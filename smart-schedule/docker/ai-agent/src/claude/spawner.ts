@@ -9,9 +9,12 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { writeFile, unlink, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { mkdtemp } from 'node:fs/promises';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─── Env Isolation ──────────────────────────────────────────────────────────
 
