@@ -1,6 +1,6 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc* ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src/ src/
@@ -10,7 +10,7 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -g 1001 -S aiagent && adduser -S aiagent -u 1001
-COPY --from=builder /app/package.json /app/package-lock.json* ./
+COPY --from=builder /app/package.json /app/package-lock.json* /app/.npmrc* ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/dist/ dist/
 USER aiagent
