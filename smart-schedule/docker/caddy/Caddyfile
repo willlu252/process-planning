@@ -1,8 +1,7 @@
 {$SITE_ADDRESS} {
 	handle /healthz {
-		respond "{\"status\":\"ok\",\"service\":\"smart-schedule-edge\"}" 200 {
-			content_type application/json
-		}
+		header Content-Type application/json
+		respond "{\"status\":\"ok\",\"service\":\"smart-schedule-edge\"}" 200
 	}
 
 	# ── PostgREST: REST API ──────────────────────────────────────
