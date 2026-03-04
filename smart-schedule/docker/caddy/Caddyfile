@@ -23,13 +23,12 @@
 	# ── Realtime: WebSocket ──────────────────────────────────────
 	# Supabase JS client sends: /realtime/v1/websocket
 	# Realtime expects: /socket/websocket (Elixir/Phoenix channels)
+	# Caddy handles WebSocket upgrades automatically — no explicit
+	# header_up directives needed.
 	handle /realtime/v1/* {
 		uri strip_prefix /realtime/v1
 		uri replace /websocket /socket/websocket
-		reverse_proxy realtime:4000 {
-			header_up Connection {>Connection}
-			header_up Upgrade {>Upgrade}
-		}
+		reverse_proxy realtime:4000
 	}
 
 	# ── AI Agent: Claude Code integration ────────────────────────
