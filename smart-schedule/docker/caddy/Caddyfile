@@ -1,0 +1,62 @@
+{$SITE_ADDRESS} {
+	handle /healthz {
+		respond "{\"status\":\"ok\",\"service\":\"smart-schedule-edge\"}" 200 {
+			content_type application/json
+		}
+	}
+
+	# ── PostgREST: REST API ──────────────────────────────────────
+	# Supabase JS client sends: /rest/v1/{table}
+	# PostgREST expects: /{table}
+	handle /rest/v1/* {
+		uri strip_prefix /rest/v1
+		reverse_proxy postgrest:3000
+	}
+
+	# ── GoTrue: Auth ─────────────────────────────────────────────
+	# Supabase JS client sends: /auth/v1/{endpoint}
+	# GoTrue expects: /{endpoint}
+	handle /auth/v1/* {
+		uri strip_prefix /auth/v1
+		reverse_proxy gotrue:9999
+	}
+
+	# ── Realtime: WebSocket ──────────────────────────────────────
+	# Supabase JS client sends: /realtime/v1/websocket
+	# Realtime expects: /socket/websocket (Elixir/Phoenix channels)
+	handle /realtime/v1/* {
+		uri strip_prefix /realtime/v1
+		uri replace /websocket /socket/websocket
+		reverse_proxy realtime:4000 {
+			header_up Connection {>Connection}
+			header_up Upgrade {>Upgrade}
+		}
+	}
+
+	# ── AI Agent: Claude Code integration ────────────────────────
+	handle /ai/* {
+		reverse_proxy ai-agent:3100
+	}
+
+	# ── Frontend: catch-all ──────────────────────────────────────
+	handle {
+		reverse_proxy frontend:8080
+	}
+
+	# ── Global headers ───────────────────────────────────────────
+	header {
+		X-Content-Type-Options    nosniff
+		X-Frame-Options           DENY
+		Referrer-Policy           strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Compression
+	encode gzip zstd
+
+	# Logging
+	log {
+		output stdout
+		format json
+	}
+}

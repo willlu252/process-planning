@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.npm-cache/
+*.local
+.env
+.env.*
+!.env.example
+
+# Local/private artifacts (do not commit)
+.agent-loop/
+.claude/plans/
+smart_schedule.html

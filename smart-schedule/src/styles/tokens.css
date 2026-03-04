@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/*
+ * Design Tokens — Smart Schedule
+ * All styling values flow through these CSS variables.
+ * Theme updates require editing this file only.
+ */
+
+@theme {
+  /* --- Color palette (light) --- */
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0.004 285.82);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0.004 285.82);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0.004 285.82);
+  --color-primary: oklch(0.205 0.006 285.82);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.97 0.001 285.82);
+  --color-secondary-foreground: oklch(0.205 0.006 285.82);
+  --color-muted: oklch(0.97 0.001 285.82);
+  --color-muted-foreground: oklch(0.556 0.005 285.82);
+  --color-accent: oklch(0.97 0.001 285.82);
+  --color-accent-foreground: oklch(0.205 0.006 285.82);
+  --color-destructive: oklch(0.577 0.245 27.33);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.922 0.004 285.82);
+  --color-input: oklch(0.922 0.004 285.82);
+  --color-ring: oklch(0.708 0.005 285.82);
+  --color-chart-1: oklch(0.646 0.222 41.12);
+  --color-chart-2: oklch(0.6 0.118 184.71);
+  --color-chart-3: oklch(0.398 0.07 227.39);
+  --color-chart-4: oklch(0.828 0.189 84.43);
+  --color-chart-5: oklch(0.769 0.188 70.08);
+
+  /* --- Status colors --- */
+  --color-status-unscheduled: oklch(0.556 0.005 285.82);
+  --color-status-scheduled: oklch(0.623 0.214 259.13);
+  --color-status-in-progress: oklch(0.768 0.233 130.85);
+  --color-status-qc-hold: oklch(0.795 0.184 86.05);
+  --color-status-qc-pass: oklch(0.696 0.17 162.48);
+  --color-status-completed: oklch(0.6 0.118 184.71);
+  --color-status-on-hold: oklch(0.646 0.222 41.12);
+  --color-status-cancelled: oklch(0.577 0.245 27.33);
+
+  /* --- Sidebar --- */
+  --color-sidebar: oklch(0.985 0 0);
+  --color-sidebar-foreground: oklch(0.145 0.004 285.82);
+  --color-sidebar-primary: oklch(0.205 0.006 285.82);
+  --color-sidebar-primary-foreground: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.97 0.001 285.82);
+  --color-sidebar-accent-foreground: oklch(0.205 0.006 285.82);
+  --color-sidebar-border: oklch(0.922 0.004 285.82);
+  --color-sidebar-ring: oklch(0.708 0.005 285.82);
+
+  /* --- Radii --- */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-card: 0.5rem;
+  --radius-input: 0.375rem;
+  --radius-button: 0.375rem;
+  --radius-modal: 0.75rem;
+
+  /* --- Shadows / Elevation --- */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-dropdown: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
+  --shadow-modal: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+/* --- Dark mode --- */
+.dark {
+  --color-background: oklch(0.145 0.004 285.82);
+  --color-foreground: oklch(0.985 0 0);
+  --color-card: oklch(0.145 0.004 285.82);
+  --color-card-foreground: oklch(0.985 0 0);
+  --color-popover: oklch(0.145 0.004 285.82);
+  --color-popover-foreground: oklch(0.985 0 0);
+  --color-primary: oklch(0.985 0 0);
+  --color-primary-foreground: oklch(0.205 0.006 285.82);
+  --color-secondary: oklch(0.269 0.006 285.82);
+  --color-secondary-foreground: oklch(0.985 0 0);
+  --color-muted: oklch(0.269 0.006 285.82);
+  --color-muted-foreground: oklch(0.708 0.005 285.82);
+  --color-accent: oklch(0.269 0.006 285.82);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive: oklch(0.704 0.191 22.22);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.269 0.006 285.82);
+  --color-input: oklch(0.269 0.006 285.82);
+  --color-ring: oklch(0.556 0.005 285.82);
+  --color-chart-1: oklch(0.488 0.243 264.05);
+  --color-chart-2: oklch(0.696 0.17 162.48);
+  --color-chart-3: oklch(0.769 0.188 70.08);
+  --color-chart-4: oklch(0.627 0.265 303.9);
+  --color-chart-5: oklch(0.645 0.246 16.44);
+
+  --color-sidebar: oklch(0.205 0.006 285.82);
+  --color-sidebar-foreground: oklch(0.985 0 0);
+  --color-sidebar-primary: oklch(0.488 0.243 264.05);
+  --color-sidebar-primary-foreground: oklch(0.985 0 0);
+  --color-sidebar-accent: oklch(0.269 0.006 285.82);
+  --color-sidebar-accent-foreground: oklch(0.985 0 0);
+  --color-sidebar-border: oklch(0.269 0.006 285.82);
+  --color-sidebar-ring: oklch(0.556 0.005 285.82);
+}
+
+/* --- Base layer --- */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}

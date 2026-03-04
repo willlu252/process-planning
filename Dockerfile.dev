@@ -1,0 +1,15 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY smart-schedule/package.json smart-schedule/package-lock.json ./
+RUN npm ci
+
+COPY smart-schedule/ .
+
+ENV VITE_E2E_MOCK_AUTH=true
+ENV VITE_SUPABASE_URL=http://localhost
+ENV VITE_SUPABASE_ANON_KEY=mock-anon-key
+
+EXPOSE 5173
+CMD sh -c 'export VITE_BASE_PATH=$PREVIEW_BASE_PATH && npm run build && npx vite preview --host 0.0.0.0 --port 5173'

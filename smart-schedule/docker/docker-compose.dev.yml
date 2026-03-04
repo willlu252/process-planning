@@ -1,0 +1,57 @@
+# Dev overrides — use with:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
+
+services:
+  # Enable Studio + PG Meta in dev
+  studio:
+    profiles: []          # override: always start in dev
+    ports:
+      - "3000:3000"
+
+  meta:
+    profiles: []          # override: always start in dev
+    ports:
+      - "8080:8080"
+
+  # Expose PostgREST directly for dev tooling
+  postgrest:
+    ports:
+      - "3001:3000"
+
+  # Expose GoTrue directly for dev tooling
+  gotrue:
+    ports:
+      - "9999:9999"
+
+  # Expose Realtime directly for dev tooling
+  realtime:
+    ports:
+      - "4000:4000"
+
+  # In dev, replace the built frontend with a Vite dev server
+  frontend:
+    build: !reset null
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 8080"
+    volumes:
+      - ../src:/app/src
+      - ../public:/app/public
+      - ../index.html:/app/index.html
+      - ../package.json:/app/package.json
+      - ../package-lock.json:/app/package-lock.json
+      - ../tsconfig.json:/app/tsconfig.json
+      - ../tsconfig.app.json:/app/tsconfig.app.json
+      - ../vite.config.ts:/app/vite.config.ts
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_SUPABASE_URL: http://localhost
+      VITE_SUPABASE_ANON_KEY: ${ANON_KEY}
+
+  # Use localhost TLS in dev
+  caddy:
+    environment:
+      SITE_ADDRESS: "localhost"
+
+volumes:
+  frontend_node_modules:

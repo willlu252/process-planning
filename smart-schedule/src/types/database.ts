@@ -1,0 +1,327 @@
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
+/** Maps snake_case DB rows to camelCase frontend types */
+export interface DatabaseRow {
+  sites: {
+    id: string;
+    name: string;
+    code: string;
+    timezone: string;
+    week_end_day: number;
+    schedule_horizon: number;
+    config: Json;
+    active: boolean;
+    created_at: string;
+  };
+  site_users: {
+    id: string;
+    site_id: string;
+    external_id: string;
+    email: string;
+    display_name: string | null;
+    role: string;
+    active: boolean;
+    preferences: Json;
+    created_at: string;
+    updated_at: string;
+  };
+  resources: {
+    id: string;
+    site_id: string;
+    resource_code: string;
+    resource_type: string;
+    display_name: string | null;
+    trunk_line: string | null;
+    group_name: string | null;
+    min_capacity: number | null;
+    max_capacity: number | null;
+    max_batches_per_day: number;
+    chemical_base: string | null;
+    sort_order: number;
+    active: boolean;
+    config: Json;
+    created_at: string;
+  };
+  batches: {
+    id: string;
+    site_id: string;
+    sap_order: string;
+    material_code: string | null;
+    material_description: string | null;
+    bulk_code: string | null;
+    plan_date: string | null;
+    plan_resource_id: string | null;
+    batch_volume: number | null;
+    status: string;
+    sap_color_group: string | null;
+    pack_size: string | null;
+    rm_available: boolean;
+    packaging_available: boolean;
+    qc_observed_stage: string | null;
+    qc_observed_at: string | null;
+    qc_observed_by: string | null;
+    job_location: string | null;
+    status_comment: string | null;
+    status_changed_at: string | null;
+    status_changed_by: string | null;
+    stock_cover: number | null;
+    safety_stock: number | null;
+    po_date: string | null;
+    po_quantity: number | null;
+    forecast: number | null;
+    material_shortage: boolean;
+    vetting_status: string;
+    vetted_by: string | null;
+    vetted_at: string | null;
+    vetting_comment: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  linked_fill_orders: {
+    id: string;
+    batch_id: string;
+    site_id: string;
+    fill_order: string | null;
+    fill_material: string | null;
+    fill_description: string | null;
+    pack_size: string | null;
+    quantity: number | null;
+    unit: string | null;
+    lid_type: string | null;
+  };
+  audit_log: {
+    id: string;
+    site_id: string;
+    batch_id: string | null;
+    action: string;
+    details: Json;
+    performed_by: string | null;
+    performed_at: string;
+  };
+  admin_actions: {
+    id: string;
+    site_id: string | null;
+    actor_user_id: string;
+    action: string;
+    target_type: string;
+    target_id: string | null;
+    metadata: Json;
+    created_at: string;
+  };
+  tenant_user_roles: {
+    site_id: string;
+    user_id: string;
+    tenant_role_id: string;
+    assigned_by: string | null;
+    assigned_at: string;
+    active: boolean;
+    expires_at: string | null;
+  };
+  rbac_audit_log: {
+    id: string;
+    site_id: string;
+    actor_user_id: string;
+    action: string;
+    target_type: string;
+    target_id: string | null;
+    tenant_role_id: string | null;
+    metadata: Json;
+    created_at: string;
+  };
+  bulk_alerts: {
+    id: string;
+    site_id: string;
+    batch_id: string | null;
+    bulk_code: string | null;
+    message: string;
+    start_date: string | null;
+    end_date: string | null;
+    created_by: string | null;
+    created_at: string;
+  };
+  resource_blocks: {
+    id: string;
+    site_id: string;
+    resource_id: string;
+    start_date: string;
+    end_date: string;
+    reason: string | null;
+    created_by: string | null;
+    created_at: string;
+  };
+  notifications: {
+    id: string;
+    site_id: string;
+    user_id: string | null;
+    title: string | null;
+    message: string | null;
+    type: string | null;
+    read: boolean;
+    batch_id: string | null;
+    created_at: string;
+  };
+  substitution_rules: {
+    id: string;
+    site_id: string;
+    source_resource_id: string | null;
+    target_resource_id: string | null;
+    conditions: Json;
+    enabled: boolean;
+    created_by: string | null;
+    created_at: string;
+  };
+  schedule_rules: {
+    id: string;
+    site_id: string;
+    name: string;
+    description: string | null;
+    rule_type: string | null;
+    conditions: Json;
+    actions: Json;
+    rule_version: number;
+    schema_id: string;
+    enabled: boolean;
+    created_by: string | null;
+    created_at: string;
+  };
+  substitution_generation_settings: {
+    id: string;
+    site_id: string;
+    enabled: boolean;
+    config: Json;
+    version: number;
+    updated_by: string | null;
+    updated_at: string;
+    created_at: string;
+  };
+  ai_config: {
+    id: string;
+    site_id: string;
+    key_type: 'anthropic_api_key' | 'claude_auth_token';
+    credential_encrypted: string; // BYTEA, never exposed to frontend
+    credential_hint: string | null;
+    credential_status: 'valid' | 'invalid' | 'expired' | 'unknown';
+    credential_expires_at: string | null;
+    credential_last_validated_at: string | null;
+    key_version: number;
+    enabled: boolean;
+    created_at: string;
+    updated_at: string;
+    created_by: string | null;
+    updated_by: string | null;
+  };
+  wiki_articles: {
+    id: string;
+    site_id: string;
+    title: string;
+    content: string;
+    category: string | null;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+    created_by: string | null;
+    updated_by: string | null;
+  };
+  ai_chat_sessions: {
+    id: string;
+    site_id: string;
+    user_id: string;
+    title: string | null;
+    session_resume_id: string | null;
+    status: 'active' | 'archived';
+    created_at: string;
+    updated_at: string;
+  };
+  ai_chat_messages: {
+    id: string;
+    session_id: string;
+    site_id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    metadata: Json;
+    created_at: string;
+  };
+  ai_scans: {
+    id: string;
+    site_id: string;
+    scan_type: 'schedule_optimization' | 'rule_analysis' | 'capacity_check' | 'full_audit';
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    triggered_by: string | null;
+    scheduled_task_id: string | null;
+    report: Json;
+    error_message: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    created_at: string;
+  };
+  ai_drafts: {
+    id: string;
+    site_id: string;
+    scan_id: string | null;
+    draft_type: 'schedule_change' | 'rule_suggestion' | 'resource_rebalance';
+    title: string;
+    description: string | null;
+    payload: Json;
+    status: 'pending' | 'approved' | 'rejected' | 'applied';
+    created_by: string | null;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    review_comment: string | null;
+    applied_by: string | null;
+    applied_at: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  ai_scheduled_tasks: {
+    id: string;
+    site_id: string;
+    name: string;
+    description: string | null;
+    task_type: 'schedule_optimization' | 'rule_analysis' | 'capacity_check' | 'full_audit';
+    cron_expression: string;
+    timezone: string;
+    misfire_policy: 'skip_if_missed' | 'run_once_on_recovery';
+    lock_ttl_seconds: number;
+    retry_max: number;
+    retry_backoff_seconds: number;
+    enabled: boolean;
+    lock_key: string | null;
+    last_run_at: string | null;
+    next_run_at: string | null;
+    last_error: string | null;
+    last_run_duration_ms: number | null;
+    created_at: string;
+    updated_at: string;
+    created_by: string | null;
+    updated_by: string | null;
+  };
+  ai_task_runs: {
+    id: string;
+    task_id: string;
+    site_id: string;
+    scheduled_for: string;
+    idempotency_key: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+    attempt: number;
+    started_at: string | null;
+    finished_at: string | null;
+    error: string | null;
+    created_at: string;
+  };
+}
+
+/** Supabase Database type for the client */
+export interface Database {
+  public: {
+    Tables: {
+      [K in keyof DatabaseRow]: {
+        Row: DatabaseRow[K];
+        Insert: Partial<DatabaseRow[K]>;
+        Update: Partial<DatabaseRow[K]>;
+      };
+    };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
+  };
+}

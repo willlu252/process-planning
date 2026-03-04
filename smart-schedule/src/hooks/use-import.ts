@@ -1,0 +1,553 @@
+import { useState, useCallback } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabase/client";
+import { useCurrentSite } from "./use-current-site";
+import { parseExcelFile, excelDateToISO, type ParsedRow } from "@/lib/utils/excel-parser";
+
+/** Recognised SAP file types */
+export type SapFileType =
+  | "bulk_data"
+  | "fill_data"
+  | "coois"
+  | "zp40"
+  | "zw04"
+  | "mb52"
+  | "fill_components"
+  | "bulk_components"
+  | "unknown";
+
+export interface ParsedFile {
+  fileName: string;
+  type: SapFileType;
+  headers: string[];
+  rows: ParsedRow[];
+  rowCount: number;
+}
+
+export interface ImportBatch {
+  sapOrder: string;
+  materialCode: string | null;
+  materialDescription: string | null;
+  bulkCode: string | null;
+  planDate: string | null;
+  batchVolume: number | null;
+  sapColorGroup: string | null;
+  packSize: string | null;
+  rmAvailable: boolean;
+  packagingAvailable: boolean;
+  stockCover: number | null;
+  safetyStock: number | null;
+  poDate: string | null;
+  poQuantity: number | null;
+  forecast: number | null;
+  materialShortage: boolean;
+}
+
+export type ImportMode = "replace" | "update" | "merge";
+
+function detectFileType(headers: string[]): SapFileType {
+  const set = new Set(headers.map((h) => h.toLowerCase().trim()));
+
+  // Bulk Data (SAP production order export with mixer/dispersion columns)
+  if (
+    set.has("dispersion 1 resource") ||
+    set.has("mixer resource") ||
+    (set.has("ipt") && set.has("colgrp"))
+  )
+    return "bulk_data";
+
+  // ZP40 – Planning / Stock Coverage report
+  if (set.has("planning material") || set.has("stock cover") || set.has("available stock"))
+    return "zp40";
+
+  // ZW04 – Purchase Orders
+  if (set.has("purchasing document") || set.has("po.deliv.dt"))
+    return "zw04";
+
+  // Requirements / BOM components report (combined bulk + fill BOM lines)
+  if (
+    [...set].some((h) => h.includes("requirement quantity")) &&
+    [...set].some((h) => h.includes("requirement date"))
+  )
+    return "fill_components";
+
+  // Fill Data (filled-product orders with pack size / batch columns)
+  if (
+    set.has("pck size") ||
+    (set.has("batch") && [...set].some((h) => h.includes("total order quantity")))
+  )
+    return "fill_data";
+
+  // COOIS – generic production order list (no mixer columns)
+  if (set.has("order") && set.has("material number") && set.has("basic start date"))
+    return "coois";
+
+  // MB52 – Plant-level stock (has plant column)
+  if (
+    (set.has("unrestricted") || [...set].some((h) => h.includes("unrestricted"))) &&
+    (set.has("plnt") || set.has("name 1"))
+  )
+    return "mb52";
+
+  // Bulk Components BOM
+  if (
+    set.has("item component list") ||
+    set.has("pegged requirement") ||
+    (set.has("order") && [...set].some((h) => h.includes("requirement quantity")))
+  )
+    return "bulk_components";
+
+  // Fallback: if it has order + material columns, treat as bulk
+  if (
+    (set.has("order") || [...set].some((h) => h.includes("order"))) &&
+    (set.has("material") || [...set].some((h) => h.includes("material")))
+  )
+    return "bulk_data";
+
+  return "unknown";
+}
+
+function extractPackSize(materialCode: string | null): string | null {
+  if (!materialCode) return null;
+  const match = materialCode.match(/[-_](\d+(?:\.\d+)?[LMlm][Ll]?)$/);
+  return match ? match[1]!.toUpperCase() : null;
+}
+
+function findColumn(headers: string[], ...keywords: string[]): string | null {
+  for (const kw of keywords) {
+    const match = headers.find((h) =>
+      h.toLowerCase().includes(kw.toLowerCase()),
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
+function rowValue(row: ParsedRow, headers: string[], ...keywords: string[]): string | null {
+  const col = findColumn(headers, ...keywords);
+  if (!col) return null;
+  const val = row[col];
+  if (val == null || val === "") return null;
+  return String(val);
+}
+
+function rowNumeric(row: ParsedRow, headers: string[], ...keywords: string[]): number | null {
+  const col = findColumn(headers, ...keywords);
+  if (!col) return null;
+  const val = row[col];
+  if (val == null || val === "") return null;
+  const n = typeof val === "number" ? val : parseFloat(String(val));
+  return isNaN(n) ? null : n;
+}
+
+/** ZP40 coverage record keyed by material code */
+interface Zp40Record {
+  stockCover: number | null;
+  forecast: number | null;
+  availableStock: number | null;
+}
+
+/** ZW04 purchase order record keyed by material code */
+interface Zw04Record {
+  poDate: string | null;
+  poQuantity: number | null;
+}
+
+/** MB52 stock record keyed by material code */
+interface Mb52Record {
+  safetyStock: number | null;
+}
+
+function extractZp40Data(files: ParsedFile[]): Map<string, Zp40Record> {
+  const map = new Map<string, Zp40Record>();
+  const zp40File = files.find((f) => f.type === "zp40");
+  if (!zp40File) return map;
+
+  const { headers, rows } = zp40File;
+  for (const row of rows) {
+    // ZP40 has two material columns: "Planning material" (bulk) and "Material" (fill)
+    // Key by fill material, but also index by planning material (bulk code) as fallback
+    const planningMat = rowValue(row, headers, "planning material", "planning mat");
+    const material = rowValue(row, headers, "material") ?? planningMat;
+    if (!material) continue;
+
+    const stockCover = rowNumeric(row, headers, "stock cover");
+    const forecast = rowNumeric(row, headers, "current month forecast", "current month");
+    const availableStock = rowNumeric(row, headers, "available stock");
+    const safetyStock = rowNumeric(row, headers, "safety stock");
+
+    if (!map.has(material)) {
+      map.set(material, { stockCover, forecast, availableStock });
+    }
+    // Also index by planning material (bulk code) so bulk-level lookup works
+    if (planningMat && planningMat !== material && !map.has(planningMat)) {
+      map.set(planningMat, { stockCover, forecast, availableStock });
+    }
+    void safetyStock; // used via mb52 path below
+  }
+  return map;
+}
+
+function extractZw04Data(files: ParsedFile[]): Map<string, Zw04Record> {
+  const map = new Map<string, Zw04Record>();
+  const zw04File = files.find((f) => f.type === "zw04");
+  if (!zw04File) return map;
+
+  const { headers, rows } = zw04File;
+  for (const row of rows) {
+    const material = rowValue(row, headers, "material");
+    if (!material) continue;
+
+    // ZW04 actual column names: "PO.Deliv.Dt" for delivery date, "Remain.Qty" for open qty
+    const dateRaw = rowValue(row, headers, "po.deliv.dt", "delivery date", "del. date");
+    const poDate = excelDateToISO(dateRaw);
+    const poQuantity = rowNumeric(row, headers, "remain.qty", "remain. qty", "remaining", "order quantity");
+
+    const existing = map.get(material);
+    // Keep the earliest PO date for each material
+    if (!existing || (poDate && (!existing.poDate || poDate < existing.poDate))) {
+      map.set(material, { poDate, poQuantity });
+    }
+  }
+  return map;
+}
+
+function extractMb52Data(files: ParsedFile[]): Map<string, Mb52Record> {
+  const map = new Map<string, Mb52Record>();
+  // MB52 or ZP40 can provide safety stock
+  const mb52File = files.find((f) => f.type === "mb52") ?? files.find((f) => f.type === "zp40");
+  if (!mb52File) return map;
+
+  const { headers, rows } = mb52File;
+  for (const row of rows) {
+    const material = rowValue(row, headers, "material");
+    if (!material) continue;
+
+    // MB52 uses "Unrestricted" for SOH; ZP40 uses "Safety stock"
+    const safetyStock = rowNumeric(row, headers, "safety stock", "safety stk");
+
+    if (!map.has(material)) {
+      map.set(material, { safetyStock });
+    }
+  }
+  return map;
+}
+
+function lookupByMaterial<T>(
+  map: Map<string, T>,
+  materialCode: string | null,
+  bulkCode: string | null,
+): T | undefined {
+  if (materialCode) {
+    const exact = map.get(materialCode);
+    if (exact) return exact;
+    // Try prefix match (material code without pack size suffix)
+    const prefix = materialCode.split("-")[0];
+    if (prefix) {
+      const prefixMatch = map.get(prefix);
+      if (prefixMatch) return prefixMatch;
+    }
+  }
+  if (bulkCode) {
+    return map.get(bulkCode);
+  }
+  return undefined;
+}
+
+export function processFilesToBatches(files: ParsedFile[]): ImportBatch[] {
+  // Accept either our "bulk_data" type or "coois" (generic production order list)
+  const bulkFile =
+    files.find((f) => f.type === "bulk_data") ??
+    files.find((f) => f.type === "coois");
+  if (!bulkFile) return [];
+
+  // Extract supplementary data from other file types
+  const zp40Data = extractZp40Data(files);
+  const zw04Data = extractZw04Data(files);
+  const mb52Data = extractMb52Data(files);
+
+  const { headers, rows } = bulkFile;
+  const seen = new Set<string>();
+  const batches: ImportBatch[] = [];
+
+  for (const row of rows) {
+    // SAP Bulk Data: "Order" column (not "bulk order")
+    const sapOrder = rowValue(row, headers, "order", "bulk order", "sap order");
+    if (!sapOrder) continue;
+    // Deduplicate by order number
+    if (seen.has(sapOrder)) continue;
+    seen.add(sapOrder);
+
+    const materialCode = rowValue(row, headers, "material");
+    // SAP uses "Material description" (not just "description")
+    const materialDesc =
+      rowValue(row, headers, "material description", "description", "material desc") ?? null;
+    // Bulk code is the material code itself (ends in -B) — no separate column in bulk export
+    const bulkCode = materialCode ?? null;
+    // SAP Bulk Data: "Basic start date" (not "basic start")
+    const dateRaw = rowValue(row, headers, "basic start date", "basic start", "start date", "date");
+    const planDate = excelDateToISO(dateRaw);
+    // SAP Bulk Data: "Total order quantity" (not "order quantity")
+    const batchVolume = rowNumeric(
+      row, headers,
+      "total order quantity", "total order qty", "order quantity", "quantity", "volume",
+    );
+    // SAP Bulk Data: "ColGrp" (not "colour group")
+    const colorGroup =
+      rowValue(row, headers, "colgrp", "colour group", "color group", "color") ?? null;
+    const packSize =
+      rowValue(row, headers, "pack size", "pck size") ?? extractPackSize(materialCode);
+
+    // Cross-reference with ZP40 coverage data
+    const zp40 = lookupByMaterial(zp40Data, materialCode, bulkCode);
+    const stockCover = zp40?.stockCover ?? null;
+    const forecast = zp40?.forecast ?? null;
+    const availableStock = zp40?.availableStock ?? null;
+
+    // Cross-reference with ZW04 purchase order data
+    const zw04 = lookupByMaterial(zw04Data, materialCode, bulkCode);
+    const poDate = zw04?.poDate ?? null;
+    const poQuantity = zw04?.poQuantity ?? null;
+
+    // Cross-reference with MB52 stock data
+    const mb52 = lookupByMaterial(mb52Data, materialCode, bulkCode);
+    const safetyStock = mb52?.safetyStock ?? null;
+
+    // Derive material shortage: stock out or critical coverage
+    const materialShortage =
+      (availableStock != null && availableStock <= 0) ||
+      (stockCover != null && stockCover < 15);
+
+    batches.push({
+      sapOrder,
+      materialCode,
+      materialDescription: materialDesc,
+      bulkCode,
+      planDate,
+      batchVolume,
+      sapColorGroup: colorGroup,
+      packSize,
+      rmAvailable: !materialShortage,
+      packagingAvailable: true,
+      stockCover,
+      safetyStock,
+      poDate,
+      poQuantity,
+      forecast,
+      materialShortage,
+    });
+  }
+
+  return batches;
+}
+
+export function useImport() {
+  const { site } = useCurrentSite();
+  const queryClient = useQueryClient();
+  const [files, setFiles] = useState<ParsedFile[]>([]);
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const addFiles = useCallback(
+    async (fileList: File[]) => {
+      setIsProcessing(true);
+      try {
+        const parsed: ParsedFile[] = [];
+        for (const file of fileList) {
+          try {
+            const rows = await parseExcelFile(file);
+            if (rows.length === 0) {
+              toast.warning(`"${file.name}" has no data rows`);
+              continue;
+            }
+            const headers = Object.keys(rows[0]!);
+            const type = detectFileType(headers);
+            if (type === "unknown") {
+              toast.warning(`"${file.name}" could not be matched to a known SAP file type`);
+            }
+            parsed.push({
+              fileName: file.name,
+              type,
+              headers,
+              rows,
+              rowCount: rows.length,
+            });
+          } catch (fileErr) {
+            console.error(`Failed to parse ${file.name}:`, fileErr);
+            toast.error(`Failed to parse "${file.name}": ${fileErr instanceof Error ? fileErr.message : "unknown error"}`);
+          }
+        }
+        if (parsed.length > 0) {
+          const allFiles = [...files, ...parsed];
+          setFiles(allFiles);
+
+          // Auto-process if we have bulk data
+          const result = processFilesToBatches(allFiles);
+          setBatches(result);
+          toast.success(`Loaded ${parsed.length} file${parsed.length > 1 ? "s" : ""}`);
+        }
+      } catch (err) {
+        console.error("File import error:", err);
+        toast.error(`Import failed: ${err instanceof Error ? err.message : "unknown error"}`);
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [files],
+  );
+
+  const clearFiles = useCallback(() => {
+    setFiles([]);
+    setBatches([]);
+  }, []);
+
+  const importMutation = useMutation({
+    mutationFn: async ({
+      data,
+      mode,
+    }: {
+      data: ImportBatch[];
+      mode: ImportMode;
+    }) => {
+      if (!site) throw new Error("No site selected");
+
+      /** SAP-sourced fields that should always be updated from import data */
+      const buildSapFields = (b: ImportBatch) => ({
+        site_id: site.id,
+        sap_order: b.sapOrder,
+        material_code: b.materialCode,
+        material_description: b.materialDescription,
+        bulk_code: b.bulkCode,
+        plan_date: b.planDate,
+        batch_volume: b.batchVolume,
+        sap_color_group: b.sapColorGroup,
+        pack_size: b.packSize,
+        rm_available: b.rmAvailable,
+        packaging_available: b.packagingAvailable,
+        stock_cover: b.stockCover,
+        safety_stock: b.safetyStock,
+        po_date: b.poDate,
+        po_quantity: b.poQuantity,
+        forecast: b.forecast,
+        material_shortage: b.materialShortage,
+      });
+
+      if (mode === "replace") {
+        // Replace: delete all existing, insert fresh with defaults
+        const { error: delError } = await supabase
+          .from("batches")
+          .delete()
+          .eq("site_id", site.id);
+        if (delError) throw delError;
+
+        const rows = data.map((b) => ({
+          ...buildSapFields(b),
+          status: "Planned",
+          vetting_status: "pending",
+          vetted_by: null,
+          vetted_at: null,
+          vetting_comment: null,
+        }));
+        const { error } = await supabase.from("batches").insert(rows as never);
+        if (error) throw error;
+      } else if (mode === "merge") {
+        // Merge: fetch existing to preserve vetting state, insert new with defaults
+        const sapOrders = data.map((b) => b.sapOrder);
+        const { data: existingRows } = await supabase
+          .from("batches")
+          .select("sap_order, status, vetting_status, vetted_by, vetted_at, vetting_comment")
+          .eq("site_id", site.id)
+          .in("sap_order", sapOrders);
+
+        const existingMap = new Map(
+          (existingRows ?? []).map((r: Record<string, unknown>) => [
+            r.sap_order as string,
+            {
+              status: r.status as string,
+              vetting_status: r.vetting_status as string,
+              vetted_by: r.vetted_by as string | null,
+              vetted_at: r.vetted_at as string | null,
+              vetting_comment: r.vetting_comment as string | null,
+            },
+          ]),
+        );
+
+        const rows = data.map((b) => {
+          const existing = existingMap.get(b.sapOrder);
+          return {
+            ...buildSapFields(b),
+            // Preserve workflow fields for existing rows, defaults for new
+            status: existing?.status ?? "Planned",
+            vetting_status: existing?.vetting_status ?? "pending",
+            vetted_by: existing?.vetted_by ?? null,
+            vetted_at: existing?.vetted_at ?? null,
+            vetting_comment: existing?.vetting_comment ?? null,
+          };
+        });
+
+        const { error } = await supabase
+          .from("batches")
+          .upsert(rows as never, { onConflict: "site_id,sap_order" });
+        if (error) throw error;
+      } else {
+        // Update: only update existing rows, preserve vetting state
+        const sapOrders = data.map((b) => b.sapOrder);
+        const { data: existingRows } = await supabase
+          .from("batches")
+          .select("sap_order, status, vetting_status, vetted_by, vetted_at, vetting_comment")
+          .eq("site_id", site.id)
+          .in("sap_order", sapOrders);
+
+        const existingMap = new Map(
+          (existingRows ?? []).map((r: Record<string, unknown>) => [
+            r.sap_order as string,
+            {
+              status: r.status as string,
+              vetting_status: r.vetting_status as string,
+              vetted_by: r.vetted_by as string | null,
+              vetted_at: r.vetted_at as string | null,
+              vetting_comment: r.vetting_comment as string | null,
+            },
+          ]),
+        );
+
+        for (const b of data) {
+          const existing = existingMap.get(b.sapOrder);
+          if (!existing) continue; // Update mode: skip rows that don't exist
+
+          const { error } = await supabase
+            .from("batches")
+            .update({
+              ...buildSapFields(b),
+              // Preserve existing workflow fields
+              status: existing.status,
+              vetting_status: existing.vetting_status,
+              vetted_by: existing.vetted_by,
+              vetted_at: existing.vetted_at,
+              vetting_comment: existing.vetting_comment,
+            } as never)
+            .eq("site_id", site.id)
+            .eq("sap_order", b.sapOrder);
+          if (error) throw error;
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      clearFiles();
+    },
+  });
+
+  return {
+    files,
+    batches,
+    isProcessing,
+    addFiles,
+    clearFiles,
+    importBatches: importMutation.mutate,
+    isImporting: importMutation.isPending,
+    importError: importMutation.error,
+    importSuccess: importMutation.isSuccess,
+  };
+}

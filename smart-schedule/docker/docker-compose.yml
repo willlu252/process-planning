@@ -1,0 +1,223 @@
+x-common: &common
+  restart: unless-stopped
+  networks:
+    - smart-schedule
+
+services:
+  # ─── Postgres 16 (with pgsql-http for Graph API calls) ─────────
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    <<: *common
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-supabase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-smart_schedule}
+      JWT_SECRET: ${JWT_SECRET}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/00-extensions.sql:ro
+      - ./postgres/01-run-migrations.sh:/docker-entrypoint-initdb.d/01-run-migrations.sh:ro
+      - ./postgres/02-azure-config.sh:/docker-entrypoint-initdb.d/02-azure-config.sh:ro
+      - ../supabase/migrations:/migrations:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-supabase} -d ${POSTGRES_DB:-smart_schedule}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── PostgREST (auto-generated REST API) ───────────────────────
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    <<: *common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-supabase}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-smart_schedule}
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Supabase Realtime (WebSocket server) ──────────────────────
+  realtime:
+    image: supabase/realtime:v2.30.34
+    <<: *common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-supabase}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-smart_schedule}
+      DB_SSL: "false"
+      PORT: 4000
+      JWT_SECRET: ${JWT_SECRET}
+      REPLICATION_MODE: RLS
+      REPLICATION_POLL_INTERVAL: 100
+      SECURE_CHANNELS: "true"
+      SLOT_NAME: supabase_realtime_rls
+      TEMPORARY_SLOT: "true"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4000/api/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── GoTrue (auth server with OIDC) ───────────────────────────
+  gotrue:
+    image: supabase/gotrue:v2.158.1
+    <<: *common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://${POSTGRES_USER:-supabase}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-smart_schedule}?search_path=auth
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-true}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-false}
+      # Azure AD provider
+      GOTRUE_EXTERNAL_AZURE_ENABLED: ${AZURE_ENABLED:-false}
+      GOTRUE_EXTERNAL_AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_AZURE_SECRET: ${AZURE_SECRET:-}
+      GOTRUE_EXTERNAL_AZURE_REDIRECT_URI: ${AZURE_REDIRECT_URI:-}
+      GOTRUE_EXTERNAL_AZURE_URL: ${AZURE_URL:-}
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: ${GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED:-true}
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: ${GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI:-pg-functions://postgres/public/custom_access_token_hook}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9999/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Supabase Studio (admin UI) ───────────────────────────────
+  studio:
+    image: supabase/studio:20240923-b854c5a
+    <<: *common
+    depends_on:
+      postgrest:
+        condition: service_healthy
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SUPABASE_URL: http://postgrest:3000
+      SUPABASE_REST_URL: http://postgrest:3000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+    profiles:
+      - studio
+
+  # ─── PG Meta (required by Studio) ─────────────────────────────
+  meta:
+    image: supabase/postgres-meta:v0.83.2
+    <<: *common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: postgres
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB:-smart_schedule}
+      PG_META_DB_USER: ${POSTGRES_USER:-supabase}
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    profiles:
+      - studio
+
+  # ─── AI Agent (Claude Code integration) ───────────────────────
+  ai-agent:
+    build:
+      context: ./ai-agent
+      dockerfile: Dockerfile
+    <<: *common
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgrest:
+        condition: service_healthy
+    environment:
+      PORT: 3100
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://postgrest:3000
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AI_ENCRYPTION_KEY_CURRENT: ${AI_ENCRYPTION_KEY_CURRENT}
+      AI_ENCRYPTION_KEY_PREVIOUS: ${AI_ENCRYPTION_KEY_PREVIOUS:-}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      SCHEDULER_POLL_INTERVAL_MS: ${SCHEDULER_POLL_INTERVAL_MS:-30000}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ai/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── Caddy (reverse proxy with auto-TLS) ──────────────────────
+  caddy:
+    image: caddy:2-alpine
+    <<: *common
+    depends_on:
+      postgrest:
+        condition: service_healthy
+      gotrue:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      ai-agent:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # ─── Frontend (nginx serving built Vite app) ──────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${SITE_URL:-http://localhost}
+        VITE_SUPABASE_ANON_KEY: ${ANON_KEY}
+    <<: *common
+
+networks:
+  smart-schedule:
+    driver: bridge
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
