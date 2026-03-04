@@ -16,5 +16,5 @@ COPY --from=builder /app/dist/ dist/
 USER aiagent
 EXPOSE 3100
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD wget -qO- http://localhost:3100/ai/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3100/ai/health || exit 1
 CMD ["node", "dist/server.js"]
