@@ -45,11 +45,6 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ready || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ─── Supabase Realtime (WebSocket server) ──────────────────────
   realtime:
@@ -121,7 +116,7 @@ services:
     <<: *common
     depends_on:
       postgrest:
-        condition: service_healthy
+        condition: service_started
     environment:
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -159,7 +154,7 @@ services:
       postgres:
         condition: service_healthy
       postgrest:
-        condition: service_healthy
+        condition: service_started
     environment:
       PORT: 3100
       NODE_ENV: production
@@ -183,7 +178,7 @@ services:
     <<: *common
     depends_on:
       postgrest:
-        condition: service_healthy
+        condition: service_started
       gotrue:
         condition: service_healthy
       realtime:
