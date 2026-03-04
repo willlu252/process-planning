@@ -144,6 +144,7 @@ export function useAiChat() {
   const [streaming, setStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
   const send = useMutation({
     mutationFn: async ({
@@ -161,6 +162,7 @@ export function useAiChat() {
 
       setStreaming(true);
       setStreamContent("");
+      setPendingMessage(message);
 
       const res = await fetch(`${getAiAgentUrl()}/ai/chat`, {
         method: "POST",
@@ -218,11 +220,6 @@ export function useAiChat() {
                 fullContent += parsed.content as string;
                 setStreamContent(fullContent);
               }
-
-              if (parsed.role === "assistant" && parsed.content) {
-                fullContent = parsed.content as string;
-                setStreamContent(fullContent);
-              }
             } catch {
               // skip malformed SSE data
             }
@@ -234,6 +231,7 @@ export function useAiChat() {
     },
     onSuccess: (result) => {
       setStreaming(false);
+      setPendingMessage(null);
       if (result?.sessionId) {
         setActiveSessionId(result.sessionId);
         queryClient.invalidateQueries({ queryKey: ["ai_sessions", site?.id] });
@@ -245,6 +243,7 @@ export function useAiChat() {
     onError: (err) => {
       setStreaming(false);
       setStreamContent("");
+      setPendingMessage(null);
       if ((err as Error).name !== "AbortError") {
         toast.error(err instanceof Error ? err.message : "Chat error");
       }
@@ -273,6 +272,7 @@ export function useAiChat() {
     streaming,
     streamContent,
     activeSessionId,
+    pendingMessage,
     cancelStream,
     switchSession,
     newSession,

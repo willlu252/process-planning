@@ -60,7 +60,10 @@ export function ChatPanel({ open, onOpenChange }: ChatPanelProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[400px] flex-col p-0 sm:max-w-[400px]">
+      <SheetContent side="right" className="flex w-[400px] flex-col p-0 sm:max-w-[400px]" aria-describedby={undefined}>
+        <SheetHeader className="sr-only">
+          <SheetTitle>AI Assistant</SheetTitle>
+        </SheetHeader>
         <ChatPanelContent />
       </SheetContent>
     </Sheet>
@@ -77,6 +80,7 @@ function ChatPanelContent() {
     streaming,
     streamContent,
     activeSessionId,
+    pendingMessage,
     cancelStream,
     switchSession,
     newSession,
@@ -198,7 +202,7 @@ function ChatPanelContent() {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {messages.length === 0 && !streaming ? (
+        {messages.length === 0 && !streaming && !pendingMessage ? (
           <div className="flex h-full items-center justify-center p-6 text-center">
             <div>
               <Bot className="mx-auto h-10 w-10 text-muted-foreground/40" />
@@ -212,6 +216,17 @@ function ChatPanelContent() {
             {messages.map((msg) => (
               <ChatMessage key={msg.id} message={msg} />
             ))}
+            {pendingMessage && (
+              <ChatMessage
+                message={{
+                  id: "pending",
+                  sessionId: "",
+                  role: "user",
+                  content: pendingMessage,
+                  createdAt: new Date().toISOString(),
+                }}
+              />
+            )}
             {streaming && <StreamingMessage content={streamContent} />}
           </div>
         )}
