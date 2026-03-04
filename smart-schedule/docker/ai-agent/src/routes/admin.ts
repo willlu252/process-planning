@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authorise } from '../security/permissions.js';
+import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { encrypt, decrypt, maskCredential, rotateEncryption } from '../security/crypto.js';
 import { supabaseAdmin, encryptionConfig } from '../server.js';
 
 export const adminRouter = Router();
+
+/** Get site_users.id from JWT (set by custom_access_token_hook). */
+function siteUserId(user: JwtUserClaims): string {
+  return user.user_id ?? user.sub;
+}
 
 /**
  * POST /ai/admin/credentials/set
@@ -65,8 +70,8 @@ adminRouter.post('/admin/credentials/set', async (req: Request, res: Response) =
           credential_status: 'unknown',
           key_version: keyVersion,
           enabled: true,
-          created_by: user.sub,
-          updated_by: user.sub,
+          created_by: siteUserId(user),
+          updated_by: siteUserId(user),
         },
         { onConflict: 'site_id' },
       );
@@ -82,7 +87,7 @@ adminRouter.post('/admin/credentials/set', async (req: Request, res: Response) =
       site_id: siteId,
       action: 'ai_credential_set',
       details: { key_type: keyType, key_version: keyVersion },
-      performed_by: user.sub,
+      performed_by: siteUserId(user),
     });
 
     res.json({ success: true, hint, keyVersion });
@@ -262,7 +267,7 @@ adminRouter.post('/admin/credentials/rotate', async (req: Request, res: Response
         credential_hint: hint,
         key_version: newKeyVersion,
         credential_status: 'unknown',
-        updated_by: user.sub,
+        updated_by: siteUserId(user),
       })
       .eq('site_id', siteId);
 
@@ -280,7 +285,7 @@ adminRouter.post('/admin/credentials/rotate', async (req: Request, res: Response
         key_version: newKeyVersion,
         key_type: config.key_type,
       },
-      performed_by: user.sub,
+      performed_by: siteUserId(user),
     });
 
     res.json({
