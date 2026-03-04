@@ -3,6 +3,7 @@
  *
  * Features:
  * - Tool use via schedule-db tools (database queries, draft creation)
+ * - Tool use via wiki tools (RAG knowledge base search)
  * - Multi-turn agentic loop (tool_use → execute → tool_result → repeat)
  * - Conversation history for session context
  * - Streaming with tool use status updates
@@ -10,6 +11,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { scheduleDbTools, handleScheduleDbTool } from '../mcp/tools/schedule-db.js';
+import { wikiTools, handleWikiTool } from '../mcp/tools/wiki-search.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,9 +57,12 @@ const MAX_AGENTIC_TURNS = 15;
 
 // ─── Tool Conversion ─────────────────────────────────────────────────────────
 
+/** All tool names that belong to the wiki toolset. */
+const wikiToolNames = new Set(wikiTools.map((t) => t.name));
+
 /** Convert MCP tool definitions to Anthropic API tool format. */
 function getAnthropicTools(): Anthropic.Messages.Tool[] {
-  return scheduleDbTools.map((tool) => ({
+  return [...scheduleDbTools, ...wikiTools].map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema as Anthropic.Messages.Tool.InputSchema,
@@ -92,7 +97,8 @@ async function executeTool(
   siteId: string,
 ): Promise<{ text: string; isError: boolean }> {
   try {
-    const result = await handleScheduleDbTool(toolName, toolInput, supabase, siteId);
+    const handler = wikiToolNames.has(toolName) ? handleWikiTool : handleScheduleDbTool;
+    const result = await handler(toolName, toolInput, supabase, siteId);
     return { text: result.content.map((c) => c.text).join('\n'), isError: false };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Tool execution failed';
@@ -314,6 +320,10 @@ export function getDefaultSystemPrompt(siteId: string): string {
     '- create_draft: Propose changes for human review (never applied automatically)',
     '- update_scan_status: Update AI scan progress',
     '',
+    'You also have access to a knowledge base (wiki):',
+    '- search_wiki: Full-text search across site procedures, policies, and reference docs',
+    '- get_wiki_article: Retrieve the full content of a wiki article by ID',
+    '',
     'Guidelines:',
     '- Use your tools to look up real data before answering questions about schedules or resources.',
     '- Be concise and helpful.',
@@ -321,6 +331,7 @@ export function getDefaultSystemPrompt(siteId: string): string {
     '- When proposing changes, always use create_draft so humans can review and approve.',
     '- Explain your reasoning clearly.',
     '- If a query returns too much data, refine your filters.',
+    '- Search the wiki for site-specific procedures and policies when relevant.',
     '',
     `Current site ID: ${siteId}`,
     `Current date: ${new Date().toISOString().split('T')[0]}`,
