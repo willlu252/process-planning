@@ -202,9 +202,10 @@ export function useAiChat() {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
+        let currentEvent = "";
         for (const line of lines) {
           if (line.startsWith("event: ")) {
-            // next line should be data
+            currentEvent = line.slice(7).trim();
             continue;
           }
           if (line.startsWith("data: ")) {
@@ -216,11 +217,16 @@ export function useAiChat() {
                 setActiveSessionId(resolvedSessionId);
               }
 
+              if (currentEvent === "error" && parsed.error) {
+                throw new Error(parsed.error as string);
+              }
+
               if (parsed.content) {
                 fullContent += parsed.content as string;
                 setStreamContent(fullContent);
               }
-            } catch {
+            } catch (e) {
+              if (e instanceof Error && currentEvent === "error") throw e;
               // skip malformed SSE data
             }
           }
