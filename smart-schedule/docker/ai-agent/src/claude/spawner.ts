@@ -1,40 +1,46 @@
 /**
- * Claude API integration via Anthropic SDK.
+ * Claude API integration with full agentic loop.
  *
- * Calls the Anthropic Messages API directly instead of spawning the CLI.
- * MCP tool integration can be added later as API tool definitions.
+ * Features:
+ * - Tool use via schedule-db tools (database queries, draft creation)
+ * - Multi-turn agentic loop (tool_use → execute → tool_result → repeat)
+ * - Conversation history for session context
+ * - Streaming with tool use status updates
  */
 import Anthropic from '@anthropic-ai/sdk';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { scheduleDbTools, handleScheduleDbTool } from '../mcp/tools/schedule-db.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface SpawnConfig {
   /** Decrypted Anthropic API key */
   apiKey: string;
-  /** Supabase URL (reserved for future tool use) */
+  /** Supabase URL */
   supabaseUrl: string;
-  /** Supabase service key (reserved for future tool use) */
+  /** Supabase service key */
   supabaseServiceKey: string;
   /** Site ID scope */
   siteId: string;
   /** User prompt/message */
   prompt: string;
-  /** Session resume ID (unused with direct API — kept for interface compat) */
+  /** Session resume ID (reserved for future use) */
   sessionResumeId?: string;
   /** System prompt override */
   systemPrompt?: string;
-  /** Maximum agentic turns (unused with direct API) */
+  /** Maximum agentic turns (default: 15) */
   maxTurns?: number;
   /** AbortSignal for cancellation */
   signal?: AbortSignal;
+  /** Supabase client for tool execution (required for tool use) */
+  supabase?: SupabaseClient;
+  /** Previous conversation messages for multi-turn context */
+  conversationHistory?: Array<{ role: string; content: string }>;
 }
 
 export interface SpawnResult {
-  /** Session ID (empty for direct API calls) */
   sessionId: string;
-  /** Response messages from Claude */
   messages: ClaudeMessage[];
-  /** Whether the conversation completed normally */
   isComplete: boolean;
 }
 
@@ -45,104 +51,278 @@ export interface ClaudeMessage {
 }
 
 const MODEL = 'claude-sonnet-4-20250514';
+const MAX_AGENTIC_TURNS = 15;
 
-// ─── Batch Call ─────────────────────────────────────────────────────────────
+// ─── Tool Conversion ─────────────────────────────────────────────────────────
 
-/**
- * Call Claude API and wait for the full response.
- */
-export async function spawnClaudeAgent(config: SpawnConfig): Promise<SpawnResult> {
-  const client = new Anthropic({ apiKey: config.apiKey });
+/** Convert MCP tool definitions to Anthropic API tool format. */
+function getAnthropicTools(): Anthropic.Messages.Tool[] {
+  return scheduleDbTools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.inputSchema as Anthropic.Messages.Tool.InputSchema,
+  }));
+}
 
-  const messages: ClaudeMessage[] = [];
+// ─── Build Messages ──────────────────────────────────────────────────────────
 
-  try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system: config.systemPrompt ?? getDefaultSystemPrompt(config.siteId),
-      messages: [{ role: 'user', content: config.prompt }],
-    });
+/** Build Anthropic message array from conversation history + new message. */
+function buildMessages(
+  history: Array<{ role: string; content: string }>,
+  newMessage: string,
+): Anthropic.Messages.MessageParam[] {
+  const messages: Anthropic.Messages.MessageParam[] = [];
 
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        messages.push({ type: 'text', content: block.text });
-      }
+  for (const msg of history) {
+    if (msg.role === 'user' || msg.role === 'assistant') {
+      messages.push({ role: msg.role, content: msg.content });
     }
+  }
 
-    return { sessionId: response.id, messages, isComplete: true };
+  messages.push({ role: 'user', content: newMessage });
+  return messages;
+}
+
+// ─── Execute Tool ────────────────────────────────────────────────────────────
+
+async function executeTool(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  supabase: SupabaseClient,
+  siteId: string,
+): Promise<{ text: string; isError: boolean }> {
+  try {
+    const result = await handleScheduleDbTool(toolName, toolInput, supabase, siteId);
+    return { text: result.content.map((c) => c.text).join('\n'), isError: false };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Unknown API error';
-    console.error('[spawner] Claude API error:', errorMsg);
-    messages.push({ type: 'error', content: errorMsg });
-    return { sessionId: '', messages, isComplete: false };
+    const errMsg = err instanceof Error ? err.message : 'Tool execution failed';
+    console.error(`[spawner] Tool ${toolName} error:`, errMsg);
+    return { text: `Error: ${errMsg}`, isError: true };
   }
 }
 
-// ─── Streaming Call ─────────────────────────────────────────────────────────
+// ─── Streaming Agentic Loop ─────────────────────────────────────────────────
 
 /**
- * Call Claude API with streaming. Yields text chunks as they arrive.
+ * Call Claude API with streaming and full agentic tool-use loop.
+ * Yields chunks as they arrive: text deltas, tool use status, errors.
  */
 export async function* spawnClaudeAgentStreaming(
   config: SpawnConfig,
 ): AsyncGenerator<ClaudeMessage> {
   const client = new Anthropic({ apiKey: config.apiKey });
+  const tools = config.supabase ? getAnthropicTools() : undefined;
+  const maxTurns = config.maxTurns ?? MAX_AGENTIC_TURNS;
+
+  const messages = buildMessages(
+    config.conversationHistory ?? [],
+    config.prompt,
+  );
+
+  let turn = 0;
 
   try {
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 4096,
-      system: config.systemPrompt ?? getDefaultSystemPrompt(config.siteId),
-      messages: [{ role: 'user', content: config.prompt }],
-    });
+    while (turn < maxTurns) {
+      turn++;
+      console.log(`[spawner] Turn ${turn}/${maxTurns}, messages: ${messages.length}`);
 
-    if (config.signal) {
-      const onAbort = (): void => { stream.abort(); };
-      config.signal.addEventListener('abort', onAbort, { once: true });
-    }
+      const stream = client.messages.stream({
+        model: MODEL,
+        max_tokens: 16384,
+        system: config.systemPrompt ?? getDefaultSystemPrompt(config.siteId),
+        messages,
+        ...(tools ? { tools } : {}),
+      });
 
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
+      // Handle abort signal
+      if (config.signal) {
+        const onAbort = (): void => { stream.abort(); };
+        config.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      // Stream text deltas to caller
+      for await (const event of stream) {
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'text_delta'
+        ) {
+          yield { type: 'text', content: event.delta.text };
+        }
+      }
+
+      const response = await stream.finalMessage();
+
+      // If not tool_use, we're done
+      if (response.stop_reason !== 'tool_use') {
+        yield { type: 'text', content: '', metadata: { sessionId: response.id } };
+        break;
+      }
+
+      // No supabase client — can't execute tools
+      if (!config.supabase) {
+        yield { type: 'error', content: 'Tool use requested but no database client available' };
+        break;
+      }
+
+      // Add assistant response (with tool_use blocks) to messages
+      messages.push({ role: 'assistant', content: response.content });
+
+      // Execute each tool and collect results
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+
+      for (const block of response.content) {
+        if (block.type === 'tool_use') {
+          // Notify caller about tool execution
+          yield {
+            type: 'tool_use',
+            content: `Querying: ${block.name.replace(/_/g, ' ')}`,
+            metadata: { toolName: block.name, toolInput: block.input },
+          };
+
+          const result = await executeTool(
+            block.name,
+            block.input as Record<string, unknown>,
+            config.supabase,
+            config.siteId,
+          );
+
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: result.text,
+            ...(result.isError ? { is_error: true } : {}),
+          });
+        }
+      }
+
+      // Add tool results to messages for next turn
+      messages.push({ role: 'user', content: toolResults });
+
+      // Safety: if we've hit max turns, let the user know
+      if (turn >= maxTurns) {
         yield {
-          type: 'text',
-          content: event.delta.text,
+          type: 'error',
+          content: 'Reached maximum number of agentic turns. Please continue the conversation.',
         };
       }
     }
-
-    const finalMessage = await stream.finalMessage();
-    yield {
-      type: 'text',
-      content: '',
-      metadata: { sessionId: finalMessage.id },
-    };
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return;
     const errorMsg = err instanceof Error ? err.message : 'Unknown API error';
-    console.error('[spawner] Claude streaming error:', errorMsg);
+    console.error('[spawner] Claude agentic error:', errorMsg);
     yield { type: 'error', content: errorMsg };
+  }
+}
+
+// ─── Non-streaming Agentic Loop ─────────────────────────────────────────────
+
+/**
+ * Call Claude API with full agentic loop (non-streaming).
+ * Used by scan-runner and other batch operations.
+ */
+export async function spawnClaudeAgent(config: SpawnConfig): Promise<SpawnResult> {
+  const client = new Anthropic({ apiKey: config.apiKey });
+  const tools = config.supabase ? getAnthropicTools() : undefined;
+  const maxTurns = config.maxTurns ?? MAX_AGENTIC_TURNS;
+  const resultMessages: ClaudeMessage[] = [];
+
+  const messages = buildMessages(
+    config.conversationHistory ?? [],
+    config.prompt,
+  );
+
+  let turn = 0;
+  let lastResponseId = '';
+
+  try {
+    while (turn < maxTurns) {
+      turn++;
+      console.log(`[spawner] Batch turn ${turn}/${maxTurns}`);
+
+      const response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 16384,
+        system: config.systemPrompt ?? getDefaultSystemPrompt(config.siteId),
+        messages,
+        ...(tools ? { tools } : {}),
+      });
+
+      lastResponseId = response.id;
+
+      // Collect text blocks
+      for (const block of response.content) {
+        if (block.type === 'text') {
+          resultMessages.push({ type: 'text', content: block.text });
+        }
+      }
+
+      // If not tool_use, we're done
+      if (response.stop_reason !== 'tool_use' || !config.supabase) break;
+
+      // Process tool use
+      messages.push({ role: 'assistant', content: response.content });
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+
+      for (const block of response.content) {
+        if (block.type === 'tool_use') {
+          resultMessages.push({
+            type: 'tool_use',
+            content: block.name,
+            metadata: { toolInput: block.input },
+          });
+
+          const result = await executeTool(
+            block.name,
+            block.input as Record<string, unknown>,
+            config.supabase,
+            config.siteId,
+          );
+
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: result.text,
+            ...(result.isError ? { is_error: true } : {}),
+          });
+        }
+      }
+
+      messages.push({ role: 'user', content: toolResults });
+    }
+
+    return { sessionId: lastResponseId, messages: resultMessages, isComplete: true };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Unknown API error';
+    console.error('[spawner] Claude API error:', errorMsg);
+    resultMessages.push({ type: 'error', content: errorMsg });
+    return { sessionId: '', messages: resultMessages, isComplete: false };
   }
 }
 
 // ─── System Prompt ──────────────────────────────────────────────────────────
 
-/**
- * Default system prompt for the Process Planning Agent.
- */
 export function getDefaultSystemPrompt(siteId: string): string {
   return [
     'You are the Process Planning Agent for a paint manufacturing facility.',
     'Your role is to analyze production schedules, suggest optimizations, and help with resource planning.',
     '',
+    'You have access to tools that let you query the production database:',
+    '- query_batches: Search production batches by status, date range, resource',
+    '- query_resources: List available mixers and equipment',
+    '- query_substitution_rules: Check resource substitution rules',
+    '- get_schedule_summary: Get aggregate statistics',
+    '- create_draft: Propose changes for human review (never applied automatically)',
+    '- update_scan_status: Update AI scan progress',
+    '',
     'Guidelines:',
+    '- Use your tools to look up real data before answering questions about schedules or resources.',
     '- Be concise and helpful.',
-    '- When discussing schedules, reference specific batch IDs and resource names where possible.',
+    '- Reference specific batch IDs, resource names, and dates where possible.',
+    '- When proposing changes, always use create_draft so humans can review and approve.',
     '- Explain your reasoning clearly.',
+    '- If a query returns too much data, refine your filters.',
     '',
     `Current site ID: ${siteId}`,
+    `Current date: ${new Date().toISOString().split('T')[0]}`,
   ].join('\n');
 }

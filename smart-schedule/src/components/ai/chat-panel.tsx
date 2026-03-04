@@ -81,6 +81,7 @@ function ChatPanelContent() {
     streamContent,
     activeSessionId,
     pendingMessage,
+    toolStatus,
     cancelStream,
     switchSession,
     newSession,
@@ -227,7 +228,7 @@ function ChatPanelContent() {
                 }}
               />
             )}
-            {streaming && <StreamingMessage content={streamContent} />}
+            {streaming && <StreamingMessage content={streamContent} toolStatus={toolStatus} />}
           </div>
         )}
       </div>

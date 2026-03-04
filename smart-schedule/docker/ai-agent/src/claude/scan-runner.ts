@@ -151,6 +151,7 @@ export async function runClaudeScan(opts: RunClaudeScanOptions): Promise<RunClau
       prompt: buildScanPrompt(opts.scanType),
       systemPrompt: getDefaultSystemPrompt(opts.siteId),
       maxTurns: 8,
+      supabase: opts.supabase,
     });
 
     const report = {

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/ui/cn";
-import { Bot, User } from "lucide-react";
+import { Bot, User, Database } from "lucide-react";
 import type { ChatMessage as ChatMessageType } from "@/hooks/use-ai-chat";
 
 interface ChatMessageProps {
@@ -44,9 +44,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
 interface StreamingMessageProps {
   content: string;
+  toolStatus?: string | null;
 }
 
-export function StreamingMessage({ content }: StreamingMessageProps) {
+export function StreamingMessage({ content, toolStatus }: StreamingMessageProps) {
   return (
     <div className="flex gap-3 bg-muted/50 px-4 py-3">
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -54,6 +55,12 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-muted-foreground">AI Assistant</p>
+        {toolStatus && (
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Database className="h-3 w-3 animate-pulse" />
+            <span className="animate-pulse">{toolStatus}</span>
+          </div>
+        )}
         <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
           {content || (
             <span className="inline-flex items-center gap-1 text-muted-foreground">

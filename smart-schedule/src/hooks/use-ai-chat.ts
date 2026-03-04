@@ -145,6 +145,7 @@ export function useAiChat() {
   const [streamContent, setStreamContent] = useState("");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
 
   const send = useMutation({
     mutationFn: async ({
@@ -163,6 +164,7 @@ export function useAiChat() {
       setStreaming(true);
       setStreamContent("");
       setPendingMessage(message);
+      setToolStatus(null);
 
       const res = await fetch(`${getAiAgentUrl()}/ai/chat`, {
         method: "POST",
@@ -221,7 +223,13 @@ export function useAiChat() {
                 throw new Error(parsed.error as string);
               }
 
-              if (parsed.content) {
+              if (currentEvent === "status" && parsed.content) {
+                setToolStatus(parsed.content as string);
+                continue;
+              }
+
+              if (currentEvent === "message" && parsed.content) {
+                setToolStatus(null);
                 fullContent += parsed.content as string;
                 setStreamContent(fullContent);
               }
@@ -238,6 +246,7 @@ export function useAiChat() {
     onSuccess: (result) => {
       setStreaming(false);
       setPendingMessage(null);
+      setToolStatus(null);
       if (result?.sessionId) {
         setActiveSessionId(result.sessionId);
         queryClient.invalidateQueries({ queryKey: ["ai_sessions", site?.id] });
@@ -250,6 +259,7 @@ export function useAiChat() {
       setStreaming(false);
       setStreamContent("");
       setPendingMessage(null);
+      setToolStatus(null);
       if ((err as Error).name !== "AbortError") {
         toast.error(err instanceof Error ? err.message : "Chat error");
       }
@@ -279,6 +289,7 @@ export function useAiChat() {
     streamContent,
     activeSessionId,
     pendingMessage,
+    toolStatus,
     cancelStream,
     switchSession,
     newSession,
