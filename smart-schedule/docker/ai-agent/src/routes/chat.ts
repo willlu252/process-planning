@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authorise } from '../security/permissions.js';
+import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin, encryptionConfig, runtimeConfig } from '../server.js';
 import { SessionManager } from '../claude/session-manager.js';
 import { getDefaultSystemPrompt, spawnClaudeAgentStreaming } from '../claude/spawner.js';
 import { resolveSiteCredential } from '../claude/scan-runner.js';
 
 export const chatRouter = Router();
+
+/** Get site_users.id from JWT (set by custom_access_token_hook). */
+function siteUserId(user: JwtUserClaims): string {
+  return user.user_id ?? user.sub;
+}
 
 /**
  * POST /ai/chat
@@ -53,7 +58,7 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
 
     const chatSession = await sessionManager.getOrCreate(
       siteId,
-      user.sub,
+      siteUserId(user),
       sessionId,
       message.substring(0, 100),
     );

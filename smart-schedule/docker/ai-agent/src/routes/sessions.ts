@@ -1,9 +1,14 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authorise } from '../security/permissions.js';
+import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin } from '../server.js';
 
 export const sessionsRouter = Router();
+
+/** Get site_users.id from JWT (set by custom_access_token_hook). */
+function siteUserId(user: JwtUserClaims): string {
+  return user.user_id ?? user.sub;
+}
 
 /**
  * GET /ai/sessions
@@ -36,7 +41,7 @@ sessionsRouter.get('/sessions', async (req: Request, res: Response) => {
       .from('ai_chat_sessions')
       .select('id, site_id, user_id, title, status, created_at, updated_at', { count: 'exact' })
       .eq('site_id', siteId)
-      .eq('user_id', user.sub)
+      .eq('user_id', siteUserId(user))
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
 

@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authorise } from '../security/permissions.js';
+import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin, encryptionConfig, runtimeConfig } from '../server.js';
 import { runClaudeScan } from '../claude/scan-runner.js';
 
 export const scanRouter = Router();
+
+/** Get site_users.id from JWT (set by custom_access_token_hook). */
+function siteUserId(user: JwtUserClaims): string {
+  return user.user_id ?? user.sub;
+}
 
 /**
  * POST /ai/scan
@@ -44,7 +49,7 @@ scanRouter.post('/scan', async (req: Request, res: Response) => {
     supabaseServiceKey: runtimeConfig.supabaseServiceKey,
     siteId,
     scanType,
-    triggeredBy: user.sub,
+    triggeredBy: siteUserId(user),
     currentKey: encryptionConfig.currentKey,
     previousKey: encryptionConfig.previousKey,
   });

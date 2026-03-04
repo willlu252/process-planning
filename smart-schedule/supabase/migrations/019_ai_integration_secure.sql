@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS ai_config (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id     UUID NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
   key_type    TEXT NOT NULL CHECK (key_type IN ('anthropic_api_key', 'claude_auth_token')),
-  credential_encrypted BYTEA NOT NULL,
+  credential_encrypted TEXT NOT NULL,
   credential_hint TEXT,          -- e.g. "sk-ant-...7xQ" (masked)
   credential_status TEXT NOT NULL DEFAULT 'unknown'
                     CHECK (credential_status IN ('valid', 'invalid', 'expired', 'unknown')),

@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Request, Response } from 'express';
-import { authorise } from '../security/permissions.js';
+import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin } from '../server.js';
 
 export const draftsRouter = Router();
+
+/** Get site_users.id from JWT (set by custom_access_token_hook). */
+function siteUserId(user: JwtUserClaims): string {
+  return user.user_id ?? user.sub;
+}
 
 // ─── Payload validation schemas per draft_type ───────────────────────────────
 
@@ -133,7 +138,7 @@ draftsRouter.post('/drafts/:id/apply', async (req: Request, res: Response) => {
     // Call the transactional RPC — this wraps lock + validate + domain-apply + status-update + audit
     const { data, error: rpcErr } = await supabaseAdmin.rpc('apply_ai_draft', {
       p_draft_id: draftId,
-      p_user_id: user.sub,
+      p_user_id: siteUserId(user),
     });
 
     if (rpcErr) {
@@ -229,7 +234,7 @@ async function handleDraftAction(
       .from('ai_drafts')
       .update({
         status: newStatus,
-        reviewed_by: user.sub,
+        reviewed_by: siteUserId(user),
         reviewed_at: new Date().toISOString(),
         review_comment: comment ?? null,
       })
