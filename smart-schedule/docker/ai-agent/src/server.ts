@@ -49,6 +49,10 @@ function log(entry: LogEntry): void {
 export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+// createClient constructs the REST URL as `${url}/rest/v1`, but PostgREST is
+// accessed directly (no prefix) inside Docker.  Override the internal URL.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(supabaseAdmin as any).rest.url = SUPABASE_URL;
 
 // ─── Encryption config (available to routes) ─────────────────────────────────
 
