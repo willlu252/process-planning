@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Upload, FileSpreadsheet, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/ui/cn";
+import { toast } from "sonner";
 import type { ParsedFile, SapFileType } from "@/hooks/use-import";
 
 interface FileUploadProps {
@@ -53,14 +54,14 @@ export function FileUpload({
   const handleFiles = useCallback(
     (fileList: FileList | null) => {
       if (!fileList) return;
-      const accepted = Array.from(fileList).filter(
-        (f) =>
-          f.name.endsWith(".xlsx") ||
-          f.name.endsWith(".xls") ||
-          f.name.endsWith(".csv"),
-      );
+      const accepted = Array.from(fileList).filter((f) => {
+        const name = f.name.toLowerCase();
+        return name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv");
+      });
       if (accepted.length > 0) {
         onAddFiles(accepted);
+      } else if (fileList.length > 0) {
+        toast.error("Unsupported file type. Please upload .xlsx, .xls, or .csv files.");
       }
     },
     [onAddFiles],

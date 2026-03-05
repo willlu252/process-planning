@@ -42,7 +42,7 @@ function SectionCard({
   const [content, setContent] = useState(section.content);
   const [enabled, setEnabled] = useState(section.enabled);
   const hasChanges = content !== section.content || enabled !== section.enabled;
-  const ctxInfo = CONTEXT_LABELS[section.context] ?? CONTEXT_LABELS.both;
+  const ctxInfo = CONTEXT_LABELS[section.context] ?? { label: "Chat & Scan", variant: "default" as const };
 
   return (
     <Card>

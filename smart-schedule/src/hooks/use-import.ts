@@ -536,6 +536,12 @@ export function useImport() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       clearFiles();
+      toast.success("Import completed successfully");
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to import batches",
+      );
     },
   });
 
