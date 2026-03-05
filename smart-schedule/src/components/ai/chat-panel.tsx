@@ -19,6 +19,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useCurrentSite } from "@/hooks/use-current-site";
 import {
   useAiChat,
   useAiChatMessages,
@@ -37,7 +38,7 @@ export function ChatPanel({ open, onOpenChange }: ChatPanelProps) {
   if (!hasPermission("planning.ai")) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="flex w-[400px] flex-col sm:max-w-[400px]">
+        <SheetContent side="right" className="flex w-[520px] flex-col sm:max-w-[520px]">
           <SheetHeader>
             <SheetTitle>AI Chat</SheetTitle>
             <SheetDescription>AI-assisted scheduling tools</SheetDescription>
@@ -60,9 +61,9 @@ export function ChatPanel({ open, onOpenChange }: ChatPanelProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[400px] flex-col p-0 sm:max-w-[400px]" aria-describedby={undefined}>
+      <SheetContent side="right" className="flex w-[520px] flex-col p-0 sm:max-w-[520px]" aria-describedby={undefined}>
         <SheetHeader className="sr-only">
-          <SheetTitle>AI Assistant</SheetTitle>
+          <SheetTitle>Planning Assistant</SheetTitle>
         </SheetHeader>
         <ChatPanelContent />
       </SheetContent>
@@ -71,9 +72,13 @@ export function ChatPanel({ open, onOpenChange }: ChatPanelProps) {
 }
 
 function ChatPanelContent() {
+  const { site } = useCurrentSite();
   const [view, setView] = useState<"chat" | "sessions">("chat");
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const siteName = site?.name ?? "Planning";
+  const assistantName = `${siteName} Planning Assistant`;
 
   const {
     send,
@@ -174,12 +179,12 @@ function ChatPanelContent() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Bot className="h-5 w-5 text-primary" />
-          <h3 className="font-semibold">AI Assistant</h3>
+      <div className="flex items-center justify-between border-b px-4 py-3 pr-12">
+        <div className="flex min-w-0 items-center gap-2">
+          <Bot className="h-5 w-5 shrink-0 text-primary" />
+          <h3 className="truncate font-semibold text-sm">{assistantName}</h3>
         </div>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
           <Button
             variant="ghost"
             size="icon"
@@ -240,7 +245,7 @@ function ChatPanelContent() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask the AI assistant..."
+            placeholder={`Ask the ${assistantName}...`}
             className="min-h-[60px] max-h-[120px] resize-none text-sm"
             disabled={isSending}
           />

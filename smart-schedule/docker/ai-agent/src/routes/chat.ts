@@ -56,6 +56,14 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
       previousKey: encryptionConfig.previousKey,
     });
 
+    // Look up site name and user display name for personalised system prompt
+    const [siteRow, userRow] = await Promise.all([
+      supabaseAdmin.from('sites').select('name').eq('id', siteId).single(),
+      supabaseAdmin.from('site_users').select('display_name').eq('id', siteUserId(user)).single(),
+    ]);
+    const siteName = siteRow.data?.name ?? 'Unknown Site';
+    const userName = userRow.data?.display_name ?? 'the user';
+
     const chatSession = await sessionManager.getOrCreate(
       siteId,
       siteUserId(user),
@@ -87,7 +95,7 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
       siteId,
       prompt: message,
       sessionResumeId: resumeId,
-      systemPrompt: getDefaultSystemPrompt(siteId),
+      systemPrompt: getDefaultSystemPrompt(siteId, siteName, userName),
       maxTurns: 15,
       signal: abortController.signal,
       supabase: supabaseAdmin,
