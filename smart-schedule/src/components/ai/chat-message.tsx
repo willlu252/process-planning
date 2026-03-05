@@ -45,7 +45,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
         </p>
         <div className="mt-1 text-sm leading-relaxed">
           {isAssistant ? (
-            <Markdown className={markdownClasses}>{message.content}</Markdown>
+            <div className={markdownClasses}><Markdown>{message.content}</Markdown></div>
           ) : (
             <div className="whitespace-pre-wrap">{message.content}</div>
           )}
@@ -76,7 +76,7 @@ export function StreamingMessage({ content, toolStatus }: StreamingMessageProps)
         )}
         <div className="mt-1 text-sm leading-relaxed">
           {content ? (
-            <Markdown className={markdownClasses}>{content}</Markdown>
+            <div className={markdownClasses}><Markdown>{content}</Markdown></div>
           ) : (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <span className="animate-pulse">Thinking</span>
