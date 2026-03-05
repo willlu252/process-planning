@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useCurrentSite } from "./use-current-site";
-import type { DatabaseRow, Json } from "@/types/database";
+import type { DatabaseRow } from "@/types/database";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
