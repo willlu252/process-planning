@@ -47,9 +47,14 @@ export function UserInviteForm({ open, onOpenChange }: UserInviteFormProps) {
 
   function handleSelectUser(dirUser: DirectoryUser) {
     const userEmail = dirUser.mail || dirUser.userPrincipalName;
+    const fullName =
+      dirUser.displayName ||
+      [dirUser.givenName, dirUser.surname].filter(Boolean).join(" ") ||
+      "";
+    const selectedLabel = fullName || userEmail;
     setEmail(userEmail);
-    setDisplayName(dirUser.displayName ?? "");
-    setSearchInput("");
+    setDisplayName(fullName);
+    setSearchInput(selectedLabel);
     setPickerOpen(false);
   }
 
@@ -88,6 +93,7 @@ export function UserInviteForm({ open, onOpenChange }: UserInviteFormProps) {
       setEmail("");
       setDisplayName("");
       setSearchInput("");
+      setPickerOpen(false);
       setRole("member");
       onOpenChange(false);
     },
@@ -136,22 +142,31 @@ export function UserInviteForm({ open, onOpenChange }: UserInviteFormProps) {
                   </div>
                 ) : (
                   <ul className="max-h-48 overflow-y-auto py-1">
-                    {directoryUsers.map((dirUser) => (
-                      <li key={dirUser.id}>
-                        <button
-                          type="button"
-                          className="flex w-full flex-col px-3 py-2 text-left hover:bg-accent"
-                          onClick={() => handleSelectUser(dirUser)}
-                        >
-                          <span className="text-sm font-medium">
-                            {dirUser.displayName ?? dirUser.userPrincipalName}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {dirUser.mail ?? dirUser.userPrincipalName}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                    {directoryUsers.map((dirUser) => {
+                      const fullName =
+                        dirUser.displayName ||
+                        [dirUser.givenName, dirUser.surname].filter(Boolean).join(" ") ||
+                        dirUser.userPrincipalName;
+                      const email = dirUser.mail ?? dirUser.userPrincipalName;
+                      const alias = dirUser.mailNickname;
+                      return (
+                        <li key={dirUser.id}>
+                          <button
+                            type="button"
+                            className="flex w-full flex-col px-3 py-2 text-left hover:bg-accent"
+                            onClick={() => handleSelectUser(dirUser)}
+                          >
+                            <span className="text-sm font-medium">{fullName}</span>
+                            <span className="text-xs text-muted-foreground">{email}</span>
+                            {alias && (
+                              <span className="text-xs text-muted-foreground/70">
+                                alias: {alias}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </PopoverContent>

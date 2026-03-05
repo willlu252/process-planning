@@ -5,8 +5,11 @@ import { supabase } from "@/lib/supabase/client";
 export interface DirectoryUser {
   id: string;
   displayName: string | null;
+  givenName: string | null;
+  surname: string | null;
   mail: string | null;
   userPrincipalName: string;
+  mailNickname: string | null;
 }
 
 export function useDirectorySearch(input: string) {
