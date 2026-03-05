@@ -30,7 +30,7 @@ describe("use-import", () => {
   });
 
   it("processes bulk file rows into import batches", () => {
-    const batches = processFilesToBatches([
+    const result = processFilesToBatches([
       {
         fileName: "bulk.xlsx",
         type: "bulk_data",
@@ -40,10 +40,11 @@ describe("use-import", () => {
       },
     ]);
 
-    expect(batches).toHaveLength(1);
-    expect(batches[0]?.sapOrder).toBe("1001");
-    expect(batches[0]?.batchVolume).toBe(12);
-    expect(batches[0]?.packSize).toBe("20L");
+    expect(result.batches).toHaveLength(1);
+    expect(result.batches[0]?.sapOrder).toBe("1001");
+    expect(result.batches[0]?.batchVolume).toBe(12);
+    expect(result.batches[0]?.packSize).toBe("20L");
+    expect(result.missingDates).toBe(1);
   });
 
   it("adds files and derives parsed file metadata and batches", async () => {

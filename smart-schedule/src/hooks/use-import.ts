@@ -255,12 +255,18 @@ function lookupByMaterial<T>(
   return undefined;
 }
 
-export function processFilesToBatches(files: ParsedFile[]): ImportBatch[] {
+export interface ProcessResult {
+  batches: ImportBatch[];
+  missingDates: number;
+}
+
+export function processFilesToBatches(files: ParsedFile[]): ProcessResult {
   // Accept either our "bulk_data" type or "coois" (generic production order list)
   const bulkFile =
     files.find((f) => f.type === "bulk_data") ??
     files.find((f) => f.type === "coois");
-  if (!bulkFile) return [];
+  if (!bulkFile) return { batches: [], missingDates: 0 };
+  const todayISO = new Date().toISOString().split("T")[0]!;
 
   // Extract supplementary data from other file types
   const zp40Data = extractZp40Data(files);
@@ -285,8 +291,15 @@ export function processFilesToBatches(files: ParsedFile[]): ImportBatch[] {
       rowValue(row, headers, "material description", "description", "material desc") ?? null;
     // Bulk code is the material code itself (ends in -B) — no separate column in bulk export
     const bulkCode = materialCode ?? null;
-    // SAP Bulk Data: "Basic start date" (not "basic start")
-    const dateRaw = rowValue(row, headers, "basic start date", "basic start", "start date", "date");
+    // SAP date columns: try common SAP header variants
+    const dateRaw = rowValue(
+      row, headers,
+      "basic start date", "basic start", "basic fin",
+      "sched.start", "scheduled start", "sched. start",
+      "planned start", "plan date", "plan start",
+      "start date", "finish date", "due date",
+      "date",
+    );
     const planDate = excelDateToISO(dateRaw);
     // SAP Bulk Data: "Total order quantity" (not "order quantity")
     const batchVolume = rowNumeric(
@@ -324,7 +337,7 @@ export function processFilesToBatches(files: ParsedFile[]): ImportBatch[] {
       materialCode,
       materialDescription: materialDesc,
       bulkCode,
-      planDate,
+      planDate: planDate ?? todayISO,
       batchVolume,
       sapColorGroup: colorGroup,
       packSize,
@@ -339,7 +352,16 @@ export function processFilesToBatches(files: ParsedFile[]): ImportBatch[] {
     });
   }
 
-  return batches;
+  // Check whether the file had a recognisable date column at all
+  const hasDateColumn = !!findColumn(
+    headers,
+    "basic start date", "basic start", "basic fin",
+    "sched.start", "scheduled start", "sched. start",
+    "planned start", "plan date", "plan start",
+    "start date", "finish date", "due date", "date",
+  );
+
+  return { batches, missingDates: hasDateColumn ? 0 : batches.length };
 }
 
 export function useImport() {
@@ -384,8 +406,13 @@ export function useImport() {
 
           // Auto-process if we have bulk data
           const result = processFilesToBatches(allFiles);
-          setBatches(result);
+          setBatches(result.batches);
           toast.success(`Loaded ${parsed.length} file${parsed.length > 1 ? "s" : ""}`);
+          if (result.missingDates > 0) {
+            toast.warning(
+              `No date column found — ${result.missingDates} batch${result.missingDates > 1 ? "es" : ""} defaulted to today's date`,
+            );
+          }
         }
       } catch (err) {
         console.error("File import error:", err);
