@@ -1,4 +1,6 @@
 import * as XLSX from "xlsx";
+import * as cptable from "xlsx/dist/cpexcel.full.mjs";
+XLSX.set_cptable(cptable);
 
 export interface ParsedRow {
   [key: string]: string | number | null;

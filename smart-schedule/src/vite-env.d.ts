@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare module "xlsx/dist/cpexcel.full.mjs";
+
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;

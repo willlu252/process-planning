@@ -23,12 +23,20 @@
 	# ── Realtime: WebSocket ──────────────────────────────────────
 	# Supabase JS client sends: /realtime/v1/websocket
 	# Realtime expects: /socket/websocket (Elixir/Phoenix channels)
-	# Caddy handles WebSocket upgrades automatically — no explicit
-	# header_up directives needed.
+	# Strip cookies to avoid 431 (header too large) from Phoenix —
+	# auth uses the apikey query param, not cookies.
 	handle /realtime/v1/* {
 		uri strip_prefix /realtime/v1
 		uri replace /websocket /socket/websocket
-		reverse_proxy realtime:4000
+		reverse_proxy realtime:4000 {
+			header_up -Cookie
+		}
+	}
+
+	# ── Frontend error reporting: accept and discard ─────────────
+	handle /api/frontend-errors {
+		header Content-Type application/json
+		respond "{\"ok\":true}" 200
 	}
 
 	# ── AI Agent: Claude Code integration ────────────────────────
