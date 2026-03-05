@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useCurrentSite } from "./use-current-site";
+import { useResources } from "./use-resources";
 import { parseExcelFile, excelDateToISO, type ParsedRow } from "@/lib/utils/excel-parser";
+import { assignBatchesToResources } from "@/lib/utils/resource-assignment";
 
 /** Recognised SAP file types */
 export type SapFileType =
@@ -367,8 +369,10 @@ export function processFilesToBatches(files: ParsedFile[]): ProcessResult {
 export function useImport() {
   const { site } = useCurrentSite();
   const queryClient = useQueryClient();
+  const { data: resources = [] } = useResources();
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [resourceAssignments, setResourceAssignments] = useState<Map<string, string>>(new Map());
   const [isProcessing, setIsProcessing] = useState(false);
 
   const addFiles = useCallback(
@@ -407,6 +411,21 @@ export function useImport() {
           // Auto-process if we have bulk data
           const result = processFilesToBatches(allFiles);
           setBatches(result.batches);
+
+          // Auto-assign resources
+          if (resources.length > 0 && result.batches.length > 0) {
+            const assignments = assignBatchesToResources(result.batches, resources);
+            setResourceAssignments(assignments);
+            const assignedCount = assignments.size;
+            const unassignedCount = result.batches.length - assignedCount;
+            if (assignedCount > 0) {
+              toast.success(
+                `Auto-assigned ${assignedCount} batch${assignedCount > 1 ? "es" : ""} to resources` +
+                  (unassignedCount > 0 ? ` (${unassignedCount} unassigned)` : ""),
+              );
+            }
+          }
+
           toast.success(`Loaded ${parsed.length} file${parsed.length > 1 ? "s" : ""}`);
           if (result.missingDates > 0) {
             toast.warning(
@@ -421,12 +440,13 @@ export function useImport() {
         setIsProcessing(false);
       }
     },
-    [files],
+    [files, resources],
   );
 
   const clearFiles = useCallback(() => {
     setFiles([]);
     setBatches([]);
+    setResourceAssignments(new Map());
   }, []);
 
   const importMutation = useMutation({
@@ -447,6 +467,7 @@ export function useImport() {
         material_description: b.materialDescription,
         bulk_code: b.bulkCode,
         plan_date: b.planDate,
+        plan_resource_id: resourceAssignments.get(b.sapOrder) ?? null,
         batch_volume: b.batchVolume,
         sap_color_group: b.sapColorGroup,
         pack_size: b.packSize,

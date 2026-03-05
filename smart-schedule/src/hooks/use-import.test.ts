@@ -18,6 +18,10 @@ vi.mock("@/hooks/use-current-site", () => ({
   useCurrentSite: () => ({ site: { id: "site-1" } }),
 }));
 
+vi.mock("@/hooks/use-resources", () => ({
+  useResources: () => ({ data: [] }),
+}));
+
 vi.mock("@/lib/supabase/client", () => ({
   supabase: {
     from: mockFrom,

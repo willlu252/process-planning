@@ -66,6 +66,33 @@ export function useUpdateBatch() {
   });
 }
 
+/** Bulk-assign plan_resource_id for multiple batches */
+export function useBulkAssignResources() {
+  const { site } = useCurrentSite();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (assignments: Map<string, string>) => {
+      if (!site) throw new Error("No site selected");
+
+      let updated = 0;
+      for (const [batchId, resourceId] of assignments) {
+        const { error } = await supabase
+          .from("batches")
+          .update({ plan_resource_id: resourceId, updated_at: new Date().toISOString() } as never)
+          .eq("id", batchId)
+          .eq("site_id", site.id);
+        if (error) throw error;
+        updated++;
+      }
+      return updated;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+    },
+  });
+}
+
 export function useAddAuditEntry() {
   const { site, user } = useCurrentSite();
   const queryClient = useQueryClient();

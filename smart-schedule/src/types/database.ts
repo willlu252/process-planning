@@ -308,6 +308,41 @@ export interface DatabaseRow {
     error: string | null;
     created_at: string;
   };
+  colour_groups: {
+    id: string;
+    site_id: string;
+    code: string;
+    name: string;
+    hex_colour: string;
+    sort_order: number;
+    active: boolean;
+    created_at: string;
+    updated_at: string;
+  };
+  colour_transitions: {
+    id: string;
+    site_id: string;
+    from_group_id: string;
+    to_group_id: string;
+    allowed: boolean;
+    requires_washout: boolean;
+    washout_minutes: number | null;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  rule_exceptions: {
+    id: string;
+    site_id: string;
+    rule_id: string;
+    reason: string;
+    exception_type: 'suspend' | 'override' | 'modify';
+    override_config: Json;
+    starts_at: string;
+    expires_at: string | null;
+    created_by: string | null;
+    created_at: string;
+  };
 }
 
 /** Supabase Database type for the client */

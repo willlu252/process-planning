@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, Server, Settings, Building2, Key, BookOpen, Clock, Bot } from "lucide-react";
+import { Users, Server, Settings, Building2, Key, BookOpen, Clock, Bot, Palette } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { usePermissions } from "@/hooks/use-permissions";
 
@@ -27,6 +27,12 @@ export function AdminIndexPage() {
       description: "Configure site preferences and tenant access control",
       icon: Settings,
       path: "/admin/site-settings",
+    },
+    {
+      title: "Colour Groups",
+      description: "Configure colour groups and mixing transition rules",
+      icon: Palette,
+      path: "/admin/colour-groups",
     },
     ...(hasPermission("admin.settings")
       ? [
