@@ -27,9 +27,9 @@ CREATE INDEX IF NOT EXISTS idx_rule_exceptions_site
 CREATE INDEX IF NOT EXISTS idx_rule_exceptions_rule
   ON rule_exceptions (rule_id);
 
-CREATE INDEX IF NOT EXISTS idx_rule_exceptions_active
-  ON rule_exceptions (site_id, starts_at, expires_at)
-  WHERE expires_at IS NULL OR expires_at > NOW();
+-- No partial index with NOW() — filter active exceptions at query time instead
+CREATE INDEX IF NOT EXISTS idx_rule_exceptions_expiry
+  ON rule_exceptions (site_id, expires_at);
 
 -- ============================================================
 -- 2) RLS
