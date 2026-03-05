@@ -222,7 +222,10 @@ function ChatPanelContent() {
             {messages.map((msg) => (
               <ChatMessage key={msg.id} message={msg} />
             ))}
-            {pendingMessage && (
+            {pendingMessage &&
+              !messages.some(
+                (m) => m.role === "user" && m.content === pendingMessage,
+              ) && (
               <ChatMessage
                 message={{
                   id: "pending",

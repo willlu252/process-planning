@@ -307,7 +307,7 @@ export async function spawnClaudeAgent(config: SpawnConfig): Promise<SpawnResult
 
 // ─── System Prompt ──────────────────────────────────────────────────────────
 
-export function getDefaultSystemPrompt(
+function getDefaultSystemPrompt(
   siteId: string,
   siteName?: string,
   userName?: string,

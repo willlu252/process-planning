@@ -63,6 +63,11 @@ const AdminAiScheduledTasksPage = lazy(() =>
     default: m.AdminAiScheduledTasksPage,
   })),
 );
+const AdminAiInstructionsPage = lazy(() =>
+  import("./admin/ai-instructions").then((m) => ({
+    default: m.AdminAiInstructionsPage,
+  })),
+);
 
 function RouteFallback() {
   return (
@@ -107,6 +112,10 @@ export function AppRoutes() {
             <Route
               path="/admin/ai-scheduled-tasks"
               element={<AdminAiScheduledTasksPage />}
+            />
+            <Route
+              path="/admin/ai-instructions"
+              element={<AdminAiInstructionsPage />}
             />
           </Route>
 

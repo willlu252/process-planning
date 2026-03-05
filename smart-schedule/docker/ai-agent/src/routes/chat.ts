@@ -3,7 +3,8 @@ import type { Request, Response } from 'express';
 import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin, encryptionConfig, runtimeConfig } from '../server.js';
 import { SessionManager } from '../claude/session-manager.js';
-import { getDefaultSystemPrompt, spawnClaudeAgentStreaming } from '../claude/spawner.js';
+import { spawnClaudeAgentStreaming } from '../claude/spawner.js';
+import { assembleSystemPrompt } from '../claude/prompt-assembler.js';
 import { resolveSiteCredential } from '../claude/scan-runner.js';
 
 export const chatRouter = Router();
@@ -95,7 +96,7 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
       siteId,
       prompt: message,
       sessionResumeId: resumeId,
-      systemPrompt: getDefaultSystemPrompt(siteId, siteName, userName),
+      systemPrompt: await assembleSystemPrompt({ supabase: supabaseAdmin, siteId, siteName, userName, context: 'chat' }),
       maxTurns: 15,
       signal: abortController.signal,
       supabase: supabaseAdmin,

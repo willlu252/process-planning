@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, Server, Settings, Building2, Key, BookOpen, Clock } from "lucide-react";
+import { Users, Server, Settings, Building2, Key, BookOpen, Clock, Bot } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { usePermissions } from "@/hooks/use-permissions";
 
@@ -35,6 +35,12 @@ export function AdminIndexPage() {
             description: "Configure AI credentials and integration settings",
             icon: Key,
             path: "/admin/ai-settings",
+          },
+          {
+            title: "AI Instructions",
+            description: "Configure AI agent system prompt and behaviour",
+            icon: Bot,
+            path: "/admin/ai-instructions",
           },
           {
             title: "Knowledge Base",

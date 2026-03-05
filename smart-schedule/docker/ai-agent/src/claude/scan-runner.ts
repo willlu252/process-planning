@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decrypt } from '../security/crypto.js';
-import { spawnClaudeAgent, getDefaultSystemPrompt, type ClaudeMessage } from './spawner.js';
+import { spawnClaudeAgent, type ClaudeMessage } from './spawner.js';
+import { assembleSystemPrompt } from './prompt-assembler.js';
 
 export interface ResolveCredentialOptions {
   supabase: SupabaseClient;
@@ -143,13 +144,21 @@ export async function runClaudeScan(opts: RunClaudeScanOptions): Promise<RunClau
       previousKey: opts.previousKey,
     });
 
+    // Look up site name for prompt context
+    const { data: siteRow } = await opts.supabase
+      .from('sites')
+      .select('name')
+      .eq('id', opts.siteId)
+      .single();
+    const siteName = siteRow?.name ?? undefined;
+
     const spawnResult = await spawnClaudeAgent({
       apiKey: cred.credential,
       supabaseUrl: opts.supabaseUrl,
       supabaseServiceKey: opts.supabaseServiceKey,
       siteId: opts.siteId,
       prompt: buildScanPrompt(opts.scanType),
-      systemPrompt: getDefaultSystemPrompt(opts.siteId),
+      systemPrompt: await assembleSystemPrompt({ supabase: opts.supabase, siteId: opts.siteId, siteName, context: 'scan' }),
       maxTurns: 8,
       supabase: opts.supabase,
     });

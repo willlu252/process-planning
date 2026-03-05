@@ -38,6 +38,7 @@ export const ROUTE_PERMISSIONS = {
   'ai.admin.credentials': 'admin.settings',
   'ai.admin.wiki': 'admin.settings',
   'ai.admin.tasks': 'admin.settings',
+  'ai.admin.prompts': 'admin.settings',
 } as const;
 
 export type RouteAction = keyof typeof ROUTE_PERMISSIONS;
