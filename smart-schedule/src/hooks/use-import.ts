@@ -137,6 +137,15 @@ function findColumn(headers: string[], ...keywords: string[]): string | null {
   return null;
 }
 
+/** Returns the raw cell value (preserving number type for dates/serials) */
+function rowRawValue(row: ParsedRow, headers: string[], ...keywords: string[]): string | number | null {
+  const col = findColumn(headers, ...keywords);
+  if (!col) return null;
+  const val = row[col];
+  if (val == null || val === "") return null;
+  return val;
+}
+
 function rowValue(row: ParsedRow, headers: string[], ...keywords: string[]): string | null {
   const col = findColumn(headers, ...keywords);
   if (!col) return null;
@@ -213,7 +222,7 @@ function extractZw04Data(files: ParsedFile[]): Map<string, Zw04Record> {
     if (!material) continue;
 
     // ZW04 actual column names: "PO.Deliv.Dt" for delivery date, "Remain.Qty" for open qty
-    const dateRaw = rowValue(row, headers, "po.deliv.dt", "delivery date", "del. date");
+    const dateRaw = rowRawValue(row, headers, "po.deliv.dt", "delivery date", "del. date");
     const poDate = excelDateToISO(dateRaw);
     const poQuantity = rowNumeric(row, headers, "remain.qty", "remain. qty", "remaining", "order quantity");
 
@@ -304,8 +313,8 @@ export function processFilesToBatches(files: ParsedFile[]): ProcessResult {
       rowValue(row, headers, "material description", "description", "material desc") ?? null;
     // Bulk code is the material code itself (ends in -B) — no separate column in bulk export
     const bulkCode = materialCode ?? null;
-    // SAP date columns: try common SAP header variants
-    const dateRaw = rowValue(
+    // SAP date columns: use rawValue to preserve Excel serial numbers
+    const dateRaw = rowRawValue(
       row, headers,
       "basic start date", "basic start", "basic fin",
       "sched.start", "scheduled start", "sched. start",
@@ -453,15 +462,24 @@ export function useImport() {
               }
             }
 
-            // POT group mapping: SAP prefix → DB resource code prefix pattern
-            const potGroupMap: Record<string, string> = {
+            // Group mapping: SAP prefix/code → DB resource code prefix for child resolution
+            // POT groups: SAP uses POTSB99, POTWB88, etc. → resolve to individual pot children
+            // MIXER37: SAP uses MIXER37 → resolve to MIXER37A or MIXER37B child
+            const groupMap: Record<string, string> = {
               POTSB: "SBPOT",
               POTWB: "WBPOT",
               POTSS: "SSPOT",
+              MIXER37: "MIXER37",
+            };
+            // Also handle text forms from SAP
+            const exactGroupMap: Record<string, string> = {
+              "SB POT": "SBPOT",
+              "WB POT": "WBPOT",
+              "SS POT": "SSPOT",
             };
 
-            // Track POT group daily load for round-robin: resourceId → count
-            const potLoadCounts = new Map<string, number>();
+            // Track group child load for round-robin: resourceId → count
+            const childLoadCounts = new Map<string, number>();
 
             const batchesNeedingGenericAssignment: typeof result.batches = [];
 
@@ -473,27 +491,43 @@ export function useImport() {
 
               const code = batch.sapMixerResource.toUpperCase();
 
-              // Direct match (e.g. MIXER42 → MIXER1-42 via normalised lookup)
-              const directId = codeToId.get(code) ?? codeToId.get(code.replace(/-/g, ""));
+              // Check exact text group mapping first (e.g. "SB POT" → SBPOT*)
+              const exactPrefix = exactGroupMap[code];
+              if (exactPrefix) {
+                const children = resources.filter(
+                  (r) => r.active && r.resourceCode.toUpperCase().startsWith(exactPrefix),
+                );
+                if (children.length > 0) {
+                  const best = children.reduce((a, b) =>
+                    (childLoadCounts.get(a.id) ?? 0) <= (childLoadCounts.get(b.id) ?? 0) ? a : b,
+                  );
+                  assignments.set(batch.sapOrder, best.id);
+                  childLoadCounts.set(best.id, (childLoadCounts.get(best.id) ?? 0) + 1);
+                  continue;
+                }
+              }
+
+              // Direct match (e.g. MIXER42 → MIXER42)
+              const directId = codeToId.get(code);
               if (directId) {
                 assignments.set(batch.sapOrder, directId);
                 continue;
               }
 
-              // POT group resolution: e.g. POTSB99 → find least-loaded SBPOT* child
+              // Group prefix resolution: e.g. POTSB99 → SBPOT* children, MIXER37 → MIXER37A/B
               let resolved = false;
-              for (const [sapPrefix, dbPrefix] of Object.entries(potGroupMap)) {
-                if (code.startsWith(sapPrefix)) {
+              for (const [sapPrefix, dbPrefix] of Object.entries(groupMap)) {
+                if (code.startsWith(sapPrefix) && code !== sapPrefix + "A" && code !== sapPrefix + "B") {
                   const children = resources.filter(
-                    (r) => r.active && r.resourceCode.toUpperCase().startsWith(dbPrefix),
+                    (r) => r.active && r.resourceCode.toUpperCase().startsWith(dbPrefix)
+                      && r.resourceCode.toUpperCase() !== code, // exclude exact match (already tried)
                   );
                   if (children.length > 0) {
-                    // Pick least-loaded child
                     const best = children.reduce((a, b) =>
-                      (potLoadCounts.get(a.id) ?? 0) <= (potLoadCounts.get(b.id) ?? 0) ? a : b,
+                      (childLoadCounts.get(a.id) ?? 0) <= (childLoadCounts.get(b.id) ?? 0) ? a : b,
                     );
                     assignments.set(batch.sapOrder, best.id);
-                    potLoadCounts.set(best.id, (potLoadCounts.get(best.id) ?? 0) + 1);
+                    childLoadCounts.set(best.id, (childLoadCounts.get(best.id) ?? 0) + 1);
                     resolved = true;
                   }
                   break;

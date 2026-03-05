@@ -11,7 +11,15 @@ const { mockParseExcelFile, mockFrom } = vi.hoisted(() => ({
 
 vi.mock("@/lib/utils/excel-parser", () => ({
   parseExcelFile: mockParseExcelFile,
-  excelDateToISO: (value: unknown) => (typeof value === "string" ? value : null),
+  excelDateToISO: (value: unknown) => {
+    if (typeof value === "string") return value;
+    // Handle Excel serial dates (e.g. 45634 → 2024-12-08)
+    if (typeof value === "number") {
+      const date = new Date((value - 25569) * 86400 * 1000);
+      return date.toISOString().split("T")[0];
+    }
+    return null;
+  },
 }));
 
 vi.mock("@/hooks/use-current-site", () => ({
@@ -96,6 +104,29 @@ describe("use-import", () => {
     expect(batch.sapIpt).toBe(0);
     expect(batch.sapFillOrder).toBe("12088730");
     expect(batch.sapFillQuantity).toBe(480);
+    expect(result.missingDates).toBe(0);
+  });
+
+  it("handles Excel serial date numbers (not stringified)", () => {
+    // Excel serial 45634 = 2024-12-08. SheetJS returns dates as numbers.
+    const result = processFilesToBatches([
+      {
+        fileName: "bulk.xlsx",
+        type: "bulk_data",
+        headers: ["Order", "Basic Start Date", "Material", "Total Order Quantity"],
+        rows: [{
+          Order: "5001",
+          "Basic Start Date": 45634, // Excel serial number (NOT a string)
+          Material: "MAT-A",
+          "Total Order Quantity": 1000,
+        }],
+        rowCount: 1,
+      },
+    ]);
+
+    expect(result.batches).toHaveLength(1);
+    // Should parse the serial number, NOT default to today
+    expect(result.batches[0]!.planDate).toBe("2024-12-08");
     expect(result.missingDates).toBe(0);
   });
 
