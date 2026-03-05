@@ -131,7 +131,7 @@ export function ResourcesPage() {
   const isLoading = batchesLoading || resourcesLoading || blocksLoading;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 overflow-x-auto p-6">
       <PageHeader
         title="Resource View"
         description="Visualise batch assignments across resources for the week"

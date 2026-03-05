@@ -387,7 +387,7 @@ export function ResourceTimeline({
       </div>
 
       {/* Timeline grid */}
-      <div className="overflow-x-auto rounded-lg border bg-card">
+      <div className="rounded-lg border bg-card">
         <div
           className="grid min-w-[800px]"
           style={{
