@@ -167,12 +167,16 @@ export function ResourceLane({
         // Determine cell highlighting classes when dragging
         let dragCellClass = "";
         if (isDragging && target) {
-          if (target.valid) {
+          if (target.valid && target.warning) {
+            // Warning state (e.g. over capacity when allowed, washout required)
             dragCellClass =
-              "border-2 border-dashed border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30";
+              "border border-dashed border-amber-400/60 bg-amber-50/20 dark:bg-amber-950/10";
+          } else if (target.valid) {
+            dragCellClass =
+              "border border-dashed border-emerald-400/50 bg-emerald-50/20 dark:bg-emerald-950/10";
           } else {
             dragCellClass =
-              "border-2 border-dashed border-red-300 bg-red-50/30 dark:bg-red-950/20 opacity-75";
+              "border border-dashed border-red-300/40 bg-red-50/10 dark:bg-red-950/10";
           }
         }
 
@@ -213,9 +217,9 @@ export function ResourceLane({
               </div>
             )}
 
-            {/* Warning tooltip for over-capacity drops */}
+            {/* Warning for drops with caveats */}
             {isDragging && target?.valid && target.warning && (
-              <div className="mb-1 text-[9px] font-medium text-amber-600 dark:text-amber-400 text-center">
+              <div className="mb-1 text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center">
                 {target.warning}
               </div>
             )}
@@ -239,7 +243,12 @@ export function ResourceLane({
 
             {/* Empty state */}
             {dayBatches.length === 0 && !block && (
-              <div className="flex flex-1 items-center justify-center text-[10px] text-muted-foreground/40">
+              <div className={cn(
+                "flex flex-1 items-center justify-center text-[10px]",
+                isDragging && target?.valid
+                  ? "text-emerald-600/70 dark:text-emerald-400/70 font-medium"
+                  : "text-muted-foreground/40",
+              )}>
                 {isDragging && target?.valid ? "Drop here" : "\u2014"}
               </div>
             )}

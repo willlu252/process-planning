@@ -20,17 +20,19 @@ interface BatchCardProps {
   onDragEnd?: () => void;
 }
 
-function getCardBorder(batch: Batch): string {
+function getCardStyle(batch: Batch): { className: string; borderLeftColor?: string } {
   if (!batch.rmAvailable && !batch.packagingAvailable)
-    return "border-red-300 bg-red-50/80 dark:border-red-800 dark:bg-red-950/40";
+    return { className: "border-red-300 bg-red-50/60 dark:border-red-800 dark:bg-red-950/20" };
   if (!batch.rmAvailable)
-    return "border-orange-300 bg-orange-50/80 dark:border-orange-800 dark:bg-orange-950/40";
+    return { className: "border-orange-300 bg-orange-50/60 dark:border-orange-800 dark:bg-orange-950/20" };
   if (!batch.packagingAvailable)
-    return "border-amber-300 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/40";
+    return { className: "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20" };
 
-  const statusConfig = BATCH_STATUSES[batch.status];
-  if (statusConfig) return `${statusConfig.bgClass} border-current/20`;
-  return "border-border bg-card";
+  const cfg = BATCH_STATUSES[batch.status];
+  return {
+    className: "border-border bg-card",
+    borderLeftColor: cfg?.color,
+  };
 }
 
 export function BatchCard({
@@ -55,15 +57,18 @@ export function BatchCard({
     resource.minCapacity != null &&
     batch.batchVolume < resource.minCapacity;
 
+  const cardStyle = getCardStyle(batch);
+
   return (
     <div
       className={cn(
         "group relative cursor-pointer rounded-md border px-2 py-1.5 text-xs transition-shadow hover:shadow-md",
-        getCardBorder(batch),
+        cardStyle.className,
         isHighlighted && "ring-2 ring-primary ring-offset-1",
-        isDragging && "opacity-50",
+        isDragging && "opacity-60 shadow-lg",
         draggable && "cursor-grab active:cursor-grabbing",
       )}
+      style={cardStyle.borderLeftColor ? { borderLeftWidth: 3, borderLeftColor: cardStyle.borderLeftColor } : undefined}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;

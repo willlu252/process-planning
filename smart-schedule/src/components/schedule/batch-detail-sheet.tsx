@@ -6,7 +6,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -197,7 +196,7 @@ export function BatchDetailSheet({
                     onValueChange={handleStatusChange}
                     disabled={updateBatch.isPending}
                   >
-                    <SelectTrigger className="h-7 w-auto gap-1 border-0 px-0 focus:ring-0">
+                    <SelectTrigger className="h-7 w-auto gap-1.5">
                       <SelectValue>
                         <StatusBadge status={batch.status} />
                       </SelectValue>
@@ -207,7 +206,13 @@ export function BatchDetailSheet({
                         const cfg = BATCH_STATUSES[s];
                         return (
                           <SelectItem key={s} value={s}>
-                            <span className={cfg.textClass}>{cfg.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: cfg.color }}
+                              />
+                              <span>{cfg.label}</span>
+                            </div>
                           </SelectItem>
                         );
                       })}
@@ -224,28 +229,26 @@ export function BatchDetailSheet({
 
             <div className="mt-6 space-y-6">
               {/* Material alerts */}
-              {(!batch.rmAvailable || !batch.packagingAvailable) && (
-                <div className="flex flex-wrap gap-2">
+              {(!batch.rmAvailable || !batch.packagingAvailable) ? (
+                <div className="flex flex-col gap-1.5">
                   {!batch.rmAvailable && (
-                    <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-700">
-                      <AlertTriangle className="mr-1 h-3 w-3" />
-                      Waiting on Materials
-                    </Badge>
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+                      <span className="text-muted-foreground">Waiting on Materials</span>
+                    </div>
                   )}
                   {!batch.packagingAvailable && (
-                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
-                      <Package className="mr-1 h-3 w-3" />
-                      Waiting on Packaging
-                    </Badge>
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <Package className="h-4 w-4 text-amber-500 shrink-0" />
+                      <span className="text-muted-foreground">Waiting on Packaging</span>
+                    </div>
                   )}
                 </div>
-              )}
-
-              {batch.rmAvailable && batch.packagingAvailable && (
-                <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">
-                  <CheckCircle2 className="mr-1 h-3 w-3" />
-                  All Materials Available
-                </Badge>
+              ) : (
+                <div className="flex items-center gap-1.5 text-sm">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="text-muted-foreground">All Materials Available</span>
+                </div>
               )}
 
               <Separator />
@@ -367,18 +370,9 @@ export function BatchDetailSheet({
                         icon={ShieldCheck}
                         label="Vetting Status"
                         value={
-                          <Badge
-                            variant="outline"
-                            className={
-                              batch.vettingStatus === "approved"
-                                ? "border-emerald-300 text-emerald-700"
-                                : batch.vettingStatus === "rejected"
-                                  ? "border-red-300 text-red-700"
-                                  : "border-amber-300 text-amber-700"
-                            }
-                          >
+                          <span className="capitalize">
                             {batch.vettingStatus}
-                          </Badge>
+                          </span>
                         }
                       />
                       {batch.vettedBy && (

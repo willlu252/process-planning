@@ -12,6 +12,9 @@ import { MoveReasonModal } from "@/components/shared/move-reason-modal";
 import { useUpdateBatch, useAddAuditEntry } from "@/hooks/use-batch-mutations";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useCurrentSite } from "@/hooks/use-current-site";
+import { useScheduleRules } from "@/hooks/use-rules";
+import { useColourGroups, useColourTransitions } from "@/hooks/use-colour-groups";
+import { evaluateDropTarget } from "@/lib/utils/rule-evaluator";
 import type { Batch } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 import type { ResourceBlock } from "@/types/site";
@@ -64,6 +67,15 @@ export function ResourceTimeline({
   const addAudit = useAddAuditEntry();
   const { hasPermission } = usePermissions();
   const { user } = useCurrentSite();
+
+  // Schedule rules & colour data for drag-drop validation
+  const { data: scheduleRules } = useScheduleRules();
+  const { data: colourGroups } = useColourGroups();
+  const { data: colourTransitions } = useColourTransitions();
+  const enabledRules = useMemo(
+    () => (scheduleRules ?? []).filter((r) => r.enabled),
+    [scheduleRules],
+  );
 
   const canSchedule = hasPermission("batches.schedule");
 
@@ -128,36 +140,43 @@ export function ResourceTimeline({
           draggedBatch.planResourceId === resource.id &&
           draggedBatch.planDate === date
         ) {
-          // Don't add to targets (neutral)
           continue;
         }
 
-        // Blocked — invalid
+        // Blocked by resource block — always invalid
         if (blockedSet.has(key)) {
           targets.set(key, { resourceId: resource.id, date, valid: false });
           continue;
         }
 
-        // Capacity warning (but still valid)
-        let warning: string | undefined;
-        if (
-          resource.maxCapacity != null &&
-          draggedBatch.batchVolume != null &&
-          draggedBatch.batchVolume > resource.maxCapacity
-        ) {
-          warning = "Over capacity";
-        }
+        // Get batches already on this resource+date (excluding the dragged batch)
+        const cellBatches = (batchesByResource.get(resource.id) ?? []).filter(
+          (b) => b.planDate === date && b.id !== draggedBatch.id,
+        );
+
+        // Evaluate using schedule rules
+        const evalResult = evaluateDropTarget({
+          batch: draggedBatch,
+          targetResource: resource,
+          targetDate: date,
+          existingBatches: cellBatches,
+          rules: enabledRules,
+          colourGroups: colourGroups ?? [],
+          colourTransitions: colourTransitions ?? [],
+        });
 
         targets.set(key, {
           resourceId: resource.id,
           date,
-          valid: true,
-          warning,
+          valid: evalResult.valid,
+          warning: evalResult.warnings.length > 0
+            ? evalResult.warnings.join("; ")
+            : undefined,
         });
       }
     }
     return targets;
-  }, [draggedBatch, filteredResources, dates, blockedSet]);
+  }, [draggedBatch, filteredResources, dates, blockedSet, batchesByResource, enabledRules, colourGroups, colourTransitions]);
 
   // Completion stats per date (only visible resources)
   const completionByDate = useMemo(() => {
