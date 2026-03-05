@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { FileUpload } from "@/components/planning/file-upload";
 import { ImportPreview } from "@/components/planning/import-preview";
@@ -5,10 +6,24 @@ import { CoverageTable } from "@/components/planning/coverage-table";
 import { StockHeatmap } from "@/components/planning/stock-heatmap";
 import { VettingPanel } from "@/components/planning/vetting-panel";
 import { DraftReviewPanel } from "@/components/ai/draft-review";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useImport } from "@/hooks/use-import";
 import { useBatches } from "@/hooks/use-batches";
 import { useResources } from "@/hooks/use-resources";
 import { useWeek } from "@/hooks/use-week";
+import { useCurrentSite } from "@/hooks/use-current-site";
+import { usePurgeSiteData } from "@/hooks/use-batch-mutations";
 
 export function PlanningPage() {
   const {
@@ -26,12 +41,52 @@ export function PlanningPage() {
   const { data: dbBatches = [] } = useBatches();
   const { data: resources = [] } = useResources();
   const { weekEnding } = useWeek();
+  const { user } = useCurrentSite();
+  const purgeMutation = usePurgeSiteData();
+  const [purgeOpen, setPurgeOpen] = useState(false);
+
+  const isAdmin = user?.role === "site_admin" || user?.role === "super_admin";
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Planning"
         description="Import SAP data, analyse material coverage, and vet batches"
+        actions={
+          isAdmin ? (
+            <AlertDialog open={purgeOpen} onOpenChange={setPurgeOpen}>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  Purge All Data
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Purge all site data?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete all {dbBatches.length} batch
+                    {dbBatches.length !== 1 ? "es" : ""} and linked fill orders
+                    for this site. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={purgeMutation.isPending}
+                    onClick={() => {
+                      purgeMutation.mutate(undefined, {
+                        onSettled: () => setPurgeOpen(false),
+                      });
+                    }}
+                  >
+                    {purgeMutation.isPending ? "Purging…" : "Purge Everything"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : undefined
+        }
       />
 
       <FileUpload

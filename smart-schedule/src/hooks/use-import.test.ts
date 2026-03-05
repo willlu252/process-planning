@@ -48,7 +48,55 @@ describe("use-import", () => {
     expect(result.batches[0]?.sapOrder).toBe("1001");
     expect(result.batches[0]?.batchVolume).toBe(12);
     expect(result.batches[0]?.packSize).toBe("20L");
+    expect(result.batches[0]?.sapMixerResource).toBeNull();
+    expect(result.batches[0]?.sapDisperser1).toBeNull();
+    expect(result.batches[0]?.sapDisperser2).toBeNull();
     expect(result.missingDates).toBe(1);
+  });
+
+  it("parses SAP resource columns from bulk data export", () => {
+    const result = processFilesToBatches([
+      {
+        fileName: "bulk.xlsx",
+        type: "bulk_data",
+        headers: [
+          "Order", "Basic Start Date", "Material", "Total Order Quantity",
+          "Material Description", "Dispersion 1 Resource", "PRe Mix Count",
+          "Dispersion 2 Resource", "Mixer Resource", "IPT", "ColGrp",
+          "Fill Order", "Fill Quantity",
+        ],
+        rows: [{
+          Order: "10126991",
+          "Basic Start Date": "2025-12-08",
+          Material: "11088263-B",
+          "Total Order Quantity": "4750",
+          "Material Description": "WALP FENCE FINISH JARRAH",
+          "Dispersion 1 Resource": "HSD2",
+          "PRe Mix Count": "1",
+          "Dispersion 2 Resource": "ABI",
+          "Mixer Resource": "MIXER42",
+          IPT: "0",
+          ColGrp: "CGRED",
+          "Fill Order": "12088730",
+          "Fill Quantity": "480",
+        }],
+        rowCount: 1,
+      },
+    ]);
+
+    expect(result.batches).toHaveLength(1);
+    const batch = result.batches[0]!;
+    expect(batch.sapOrder).toBe("10126991");
+    expect(batch.planDate).toBe("2025-12-08");
+    expect(batch.batchVolume).toBe(4750);
+    expect(batch.sapMixerResource).toBe("MIXER42");
+    expect(batch.sapDisperser1).toBe("HSD2");
+    expect(batch.sapDisperser2).toBe("ABI");
+    expect(batch.sapPreMixCount).toBe(1);
+    expect(batch.sapIpt).toBe(0);
+    expect(batch.sapFillOrder).toBe("12088730");
+    expect(batch.sapFillQuantity).toBe(480);
+    expect(result.missingDates).toBe(0);
   });
 
   it("adds files and derives parsed file metadata and batches", async () => {

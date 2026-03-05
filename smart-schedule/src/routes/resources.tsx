@@ -76,6 +76,13 @@ export function ResourcesPage() {
         poQuantity: batch.poQuantity,
         forecast: batch.forecast,
         materialShortage: batch.materialShortage,
+        sapMixerResource: null,
+        sapDisperser1: null,
+        sapDisperser2: null,
+        sapPreMixCount: null,
+        sapIpt: null,
+        sapFillOrder: null,
+        sapFillQuantity: null,
       };
       const resourceId = assignBatchToResource(importBatch, resources);
       if (resourceId) {

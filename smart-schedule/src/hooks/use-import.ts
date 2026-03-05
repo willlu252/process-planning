@@ -44,6 +44,13 @@ export interface ImportBatch {
   poQuantity: number | null;
   forecast: number | null;
   materialShortage: boolean;
+  sapMixerResource: string | null;
+  sapDisperser1: string | null;
+  sapDisperser2: string | null;
+  sapPreMixCount: number | null;
+  sapIpt: number | null;
+  sapFillOrder: string | null;
+  sapFillQuantity: number | null;
 }
 
 export type ImportMode = "replace" | "update" | "merge";
@@ -118,6 +125,10 @@ function extractPackSize(materialCode: string | null): string | null {
 
 function findColumn(headers: string[], ...keywords: string[]): string | null {
   for (const kw of keywords) {
+    // Prefer exact match (case-insensitive) to avoid short keywords matching
+    // unrelated headers (e.g. "ipt" matching "Material Description")
+    const exact = headers.find((h) => h.toLowerCase() === kw.toLowerCase());
+    if (exact) return exact;
     const match = headers.find((h) =>
       h.toLowerCase().includes(kw.toLowerCase()),
     );
@@ -334,6 +345,15 @@ export function processFilesToBatches(files: ParsedFile[]): ProcessResult {
       (availableStock != null && availableStock <= 0) ||
       (stockCover != null && stockCover < 15);
 
+    // SAP resource assignment columns
+    const sapMixerResource = rowValue(row, headers, "mixer resource", "mixer") ?? null;
+    const sapDisperser1 = rowValue(row, headers, "dispersion 1 resource", "disperser 1") ?? null;
+    const sapDisperser2 = rowValue(row, headers, "dispersion 2 resource", "disperser 2") ?? null;
+    const sapPreMixCount = rowNumeric(row, headers, "pre mix count", "pre mix", "premix") ?? null;
+    const sapIpt = rowNumeric(row, headers, "ipt") ?? null;
+    const sapFillOrder = rowValue(row, headers, "fill order") ?? null;
+    const sapFillQuantity = rowNumeric(row, headers, "fill quantity", "fill qty") ?? null;
+
     batches.push({
       sapOrder,
       materialCode,
@@ -351,6 +371,13 @@ export function processFilesToBatches(files: ParsedFile[]): ProcessResult {
       poQuantity,
       forecast,
       materialShortage,
+      sapMixerResource,
+      sapDisperser1,
+      sapDisperser2,
+      sapPreMixCount,
+      sapIpt,
+      sapFillOrder,
+      sapFillQuantity,
     });
   }
 
@@ -412,15 +439,91 @@ export function useImport() {
           const result = processFilesToBatches(allFiles);
           setBatches(result.batches);
 
-          // Auto-assign resources
+          // Auto-assign resources: prefer SAP mixer resource codes, fall back to generic
           if (resources.length > 0 && result.batches.length > 0) {
-            const assignments = assignBatchesToResources(result.batches, resources);
+            const assignments = new Map<string, string>();
+
+            // Build lookup: resource_code (uppercase) → resource ID
+            const codeToId = new Map<string, string>();
+            for (const r of resources) {
+              if (r.active) {
+                // Store both raw code and normalised (strip hyphens) for flexible matching
+                codeToId.set(r.resourceCode.toUpperCase(), r.id);
+                codeToId.set(r.resourceCode.replace(/-/g, "").toUpperCase(), r.id);
+              }
+            }
+
+            // POT group mapping: SAP prefix → DB resource code prefix pattern
+            const potGroupMap: Record<string, string> = {
+              POTSB: "SBPOT",
+              POTWB: "WBPOT",
+              POTSS: "SSPOT",
+            };
+
+            // Track POT group daily load for round-robin: resourceId → count
+            const potLoadCounts = new Map<string, number>();
+
+            const batchesNeedingGenericAssignment: typeof result.batches = [];
+
+            for (const batch of result.batches) {
+              if (!batch.sapMixerResource) {
+                batchesNeedingGenericAssignment.push(batch);
+                continue;
+              }
+
+              const code = batch.sapMixerResource.toUpperCase();
+
+              // Direct match (e.g. MIXER42 → MIXER1-42 via normalised lookup)
+              const directId = codeToId.get(code) ?? codeToId.get(code.replace(/-/g, ""));
+              if (directId) {
+                assignments.set(batch.sapOrder, directId);
+                continue;
+              }
+
+              // POT group resolution: e.g. POTSB99 → find least-loaded SBPOT* child
+              let resolved = false;
+              for (const [sapPrefix, dbPrefix] of Object.entries(potGroupMap)) {
+                if (code.startsWith(sapPrefix)) {
+                  const children = resources.filter(
+                    (r) => r.active && r.resourceCode.toUpperCase().startsWith(dbPrefix),
+                  );
+                  if (children.length > 0) {
+                    // Pick least-loaded child
+                    const best = children.reduce((a, b) =>
+                      (potLoadCounts.get(a.id) ?? 0) <= (potLoadCounts.get(b.id) ?? 0) ? a : b,
+                    );
+                    assignments.set(batch.sapOrder, best.id);
+                    potLoadCounts.set(best.id, (potLoadCounts.get(best.id) ?? 0) + 1);
+                    resolved = true;
+                  }
+                  break;
+                }
+              }
+
+              if (!resolved) {
+                batchesNeedingGenericAssignment.push(batch);
+              }
+            }
+
+            // Fall back to generic capacity-based assignment for unmatched batches
+            if (batchesNeedingGenericAssignment.length > 0) {
+              const genericAssignments = assignBatchesToResources(
+                batchesNeedingGenericAssignment,
+                resources,
+              );
+              for (const [sapOrder, resourceId] of genericAssignments) {
+                assignments.set(sapOrder, resourceId);
+              }
+            }
+
             setResourceAssignments(assignments);
+            const sapDirectCount = result.batches.length - batchesNeedingGenericAssignment.length;
             const assignedCount = assignments.size;
             const unassignedCount = result.batches.length - assignedCount;
             if (assignedCount > 0) {
               toast.success(
                 `Auto-assigned ${assignedCount} batch${assignedCount > 1 ? "es" : ""} to resources` +
+                  (sapDirectCount > 0 ? ` (${sapDirectCount} from SAP)` : "") +
                   (unassignedCount > 0 ? ` (${unassignedCount} unassigned)` : ""),
               );
             }

@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useCurrentSite } from "./use-current-site";
 import type { BatchStatus } from "@/types/batch";
@@ -114,6 +115,53 @@ export function useAddAuditEntry() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Purge all batches and linked fill orders for the current site */
+export function usePurgeSiteData() {
+  const { site, user } = useCurrentSite();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!site) throw new Error("No site selected");
+      if (!user || (user.role !== "site_admin" && user.role !== "super_admin")) {
+        throw new Error("Only site admins can purge data");
+      }
+
+      // Delete linked fill orders first (FK dependency)
+      const { error: fillErr } = await supabase
+        .from("linked_fill_orders")
+        .delete()
+        .eq("site_id", site.id);
+      if (fillErr) throw fillErr;
+
+      // Delete all batches
+      const { error: batchErr } = await supabase
+        .from("batches")
+        .delete()
+        .eq("site_id", site.id);
+      if (batchErr) throw batchErr;
+
+      // Log to audit
+      await supabase.from("audit_log").insert({
+        site_id: site.id,
+        batch_id: null,
+        action: "purge_site_data",
+        details: { purged_by: user.email ?? user.id },
+        performed_by: user.id,
+        performed_at: new Date().toISOString(),
+      } as never);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      queryClient.invalidateQueries({ queryKey: ["linked-fill-orders"] });
+      toast.success("All batches and linked fill orders have been purged");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to purge data");
     },
   });
 }
