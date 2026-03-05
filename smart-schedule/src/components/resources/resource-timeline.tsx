@@ -394,8 +394,8 @@ export function ResourceTimeline({
             gridTemplateColumns: `180px repeat(${colCount}, minmax(120px, 1fr))`,
           }}
         >
-          {/* Header: empty corner + date headers */}
-          <div className="sticky left-0 z-30 border-b border-r bg-muted px-3 py-2">
+          {/* Header: empty corner + date headers (sticky) */}
+          <div className="sticky top-0 left-0 z-40 border-b border-r bg-muted px-3 py-2">
             <span className="text-xs font-semibold text-muted-foreground uppercase">
               Resource
             </span>
@@ -410,10 +410,9 @@ export function ResourceTimeline({
               <div
                 key={dateStr}
                 className={cn(
-                  "border-b border-r px-2 py-2 text-center",
-                  today && "bg-primary/5",
-                  weekend && "bg-muted/50",
-                  !today && !weekend && "bg-muted",
+                  "sticky top-0 z-30 border-b border-r px-2 py-2 text-center bg-card",
+                  today && "!bg-blue-50 dark:!bg-blue-950",
+                  weekend && "!bg-muted",
                 )}
               >
                 <div className="text-xs font-semibold">

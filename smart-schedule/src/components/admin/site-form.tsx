@@ -170,8 +170,9 @@ export function SiteForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="5">5 days</SelectItem>
-                  <SelectItem value="7">7 days</SelectItem>
+                  <SelectItem value="5">5 days (Mon–Fri)</SelectItem>
+                  <SelectItem value="6">6 days (Mon–Sat)</SelectItem>
+                  <SelectItem value="7">7 days (full week)</SelectItem>
                 </SelectContent>
               </Select>
             ) : (
