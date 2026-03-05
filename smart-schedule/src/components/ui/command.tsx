@@ -48,7 +48,23 @@ const CommandList = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
 >(({ className, ...props }, ref) => (
-  <CommandPrimitive.List ref={ref} className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)} {...props} />
+  <CommandPrimitive.List
+    ref={ref}
+    className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
+    onWheel={(e) => {
+      // cmdk can swallow wheel events — ensure the list scrolls natively
+      const el = e.currentTarget;
+      if (el.scrollHeight <= el.clientHeight) return;
+      const atTop = el.scrollTop === 0 && e.deltaY < 0;
+      const atBottom =
+        Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1 &&
+        e.deltaY > 0;
+      if (!atTop && !atBottom) {
+        e.stopPropagation();
+      }
+    }}
+    {...props}
+  />
 ));
 CommandList.displayName = CommandPrimitive.List.displayName;
 

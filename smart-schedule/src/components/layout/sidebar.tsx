@@ -15,7 +15,7 @@ import {
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
-import duluxLogo from "@/assets/dulux-logo.png";
+import duluxLogo from "@/assets/dulux-logo-transparent.png";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -64,12 +64,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         to={item.to}
         className={({ isActive }) =>
           cn(
-            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+            "flex items-center gap-3 rounded-md py-2 text-sm font-medium transition-colors",
             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             isActive
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "text-sidebar-foreground/70",
-            collapsed && "justify-center px-2",
+            collapsed ? "justify-center px-0" : "px-3",
           )
         }
       >
@@ -101,8 +101,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
       >
         {/* Logo / site name */}
-        <div className="flex h-14 items-center gap-2 border-b px-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white">
+        <div className={cn("flex h-14 items-center border-b", collapsed ? "justify-center px-0" : "gap-2 px-3")}>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center">
             <img src={duluxLogo} alt="Dulux" className="h-7 w-7 object-contain" />
           </div>
           {!collapsed && (

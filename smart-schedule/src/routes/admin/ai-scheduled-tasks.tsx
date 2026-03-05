@@ -60,7 +60,7 @@ type TaskType = AiTaskInput["taskType"];
 type MisfirePolicy = AiTaskInput["misfirePolicy"];
 
 const TASK_TYPE_LABELS: Record<TaskType, string> = {
-  schedule_optimization: "Schedule Optimization",
+  schedule_optimization: "Schedule Optimisation",
   rule_analysis: "Rule Analysis",
   capacity_check: "Capacity Check",
   full_audit: "Full Audit",

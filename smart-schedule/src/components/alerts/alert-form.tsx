@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -160,23 +161,21 @@ export function AlertForm({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="alert-start-date">Start Date</Label>
-              <Input
-                id="alert-start-date"
-                type="date"
+              <Label>Start Date</Label>
+              <DatePicker
                 value={form.startDate}
-                onChange={(e) => setField("startDate", e.target.value)}
+                onChange={(v) => setField("startDate", v)}
+                placeholder="Select start date"
                 disabled={isPending}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="alert-end-date">End Date</Label>
-              <Input
-                id="alert-end-date"
-                type="date"
+              <Label>End Date</Label>
+              <DatePicker
                 value={form.endDate}
-                onChange={(e) => setField("endDate", e.target.value)}
+                onChange={(v) => setField("endDate", v)}
+                placeholder="Select end date"
                 disabled={isPending}
               />
             </div>

@@ -18,8 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -507,12 +507,11 @@ export function UserRoleAssignment() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="assignment-expiry">Assignment expiry (optional)</Label>
-              <Input
-                id="assignment-expiry"
-                type="datetime-local"
+              <Label>Assignment expiry (optional)</Label>
+              <DateTimePicker
                 value={draftExpiresAt}
-                onChange={(event) => setDraftExpiresAt(event.target.value)}
+                onChange={setDraftExpiresAt}
+                placeholder="No expiry"
               />
             </div>
           </div>
