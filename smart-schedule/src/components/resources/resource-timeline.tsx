@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { format, addDays, isToday, isWeekend } from "date-fns";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/ui/cn";
 import { Search, X } from "lucide-react";
-import { ResourceLane } from "./resource-lane";
+import { toast } from "sonner";
+import { ResourceLane, type DropTarget } from "./resource-lane";
+import { MoveReasonModal } from "@/components/shared/move-reason-modal";
+import { useUpdateBatch, useAddAuditEntry } from "@/hooks/use-batch-mutations";
+import { usePermissions } from "@/hooks/use-permissions";
+import { useCurrentSite } from "@/hooks/use-current-site";
 import type { Batch } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 import type { ResourceBlock } from "@/types/site";
@@ -47,6 +52,21 @@ export function ResourceTimeline({
   const [tab, setTab] = useState<ResourceTab>("mixers");
   const [search, setSearch] = useState("");
 
+  // Drag-and-drop state
+  const [draggedBatch, setDraggedBatch] = useState<Batch | null>(null);
+  const [moveModal, setMoveModal] = useState<{
+    batch: Batch;
+    targetResourceId: string;
+    targetDate: string;
+  } | null>(null);
+
+  const updateBatch = useUpdateBatch();
+  const addAudit = useAddAuditEntry();
+  const { hasPermission } = usePermissions();
+  const { user } = useCurrentSite();
+
+  const canSchedule = hasPermission("batches.schedule");
+
   const dates = useMemo(
     () => getWeekDates(weekStart, weekEnding),
     [weekStart, weekEnding],
@@ -77,6 +97,67 @@ export function ResourceTimeline({
     }
     return map;
   }, [batches, filteredResources]);
+
+  // Blocked dates set for quick lookup
+  const blockedSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const block of blocks) {
+      // Generate all dates in block range that overlap with our week
+      let current = new Date(block.startDate + "T12:00:00");
+      const end = new Date(block.endDate + "T12:00:00");
+      while (current <= end) {
+        const dateStr = format(current, "yyyy-MM-dd");
+        set.add(`${block.resourceId}:${dateStr}`);
+        current = addDays(current, 1);
+      }
+    }
+    return set;
+  }, [blocks]);
+
+  // Compute drop targets for all cells when a batch is being dragged
+  const dropTargets = useMemo(() => {
+    if (!draggedBatch) return new Map<string, DropTarget>();
+
+    const targets = new Map<string, DropTarget>();
+    for (const resource of filteredResources) {
+      for (const date of dates) {
+        const key = `${resource.id}:${date}`;
+
+        // Same cell — not a valid target
+        if (
+          draggedBatch.planResourceId === resource.id &&
+          draggedBatch.planDate === date
+        ) {
+          // Don't add to targets (neutral)
+          continue;
+        }
+
+        // Blocked — invalid
+        if (blockedSet.has(key)) {
+          targets.set(key, { resourceId: resource.id, date, valid: false });
+          continue;
+        }
+
+        // Capacity warning (but still valid)
+        let warning: string | undefined;
+        if (
+          resource.maxCapacity != null &&
+          draggedBatch.batchVolume != null &&
+          draggedBatch.batchVolume > resource.maxCapacity
+        ) {
+          warning = "Over capacity";
+        }
+
+        targets.set(key, {
+          resourceId: resource.id,
+          date,
+          valid: true,
+          warning,
+        });
+      }
+    }
+    return targets;
+  }, [draggedBatch, filteredResources, dates, blockedSet]);
 
   // Completion stats per date (only visible resources)
   const completionByDate = useMemo(() => {
@@ -120,6 +201,110 @@ export function ResourceTimeline({
 
   const searchMatchCount = highlightedBatchIds.size;
 
+  // Drag handlers
+  const handleDragStart = useCallback((batch: Batch) => {
+    setDraggedBatch(batch);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedBatch(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (targetResourceId: string, targetDate: string) => {
+      if (!draggedBatch) return;
+
+      const dateChanged = draggedBatch.planDate !== targetDate;
+      const resourceChanged = draggedBatch.planResourceId !== targetResourceId;
+
+      if (!dateChanged && !resourceChanged) {
+        setDraggedBatch(null);
+        return;
+      }
+
+      // If date changed, require a reason
+      if (dateChanged) {
+        setMoveModal({
+          batch: draggedBatch,
+          targetResourceId,
+          targetDate,
+        });
+        setDraggedBatch(null);
+        return;
+      }
+
+      // Resource-only move — execute directly
+      executeBatchMove(draggedBatch, targetResourceId, targetDate);
+      setDraggedBatch(null);
+    },
+    [draggedBatch],
+  );
+
+  const executeBatchMove = useCallback(
+    (batch: Batch, targetResourceId: string, targetDate: string, reason?: string) => {
+      const oldResource = resources.find((r) => r.id === batch.planResourceId);
+      const newResource = resources.find((r) => r.id === targetResourceId);
+
+      updateBatch.mutate(
+        {
+          batchId: batch.id,
+          updates: {
+            planResourceId: targetResourceId,
+            planDate: targetDate,
+          },
+        },
+        {
+          onSuccess: () => {
+            const dateChanged = batch.planDate !== targetDate;
+            const direction =
+              dateChanged && targetDate < (batch.planDate ?? "")
+                ? "pulled_forward"
+                : dateChanged
+                  ? "pushed_out"
+                  : "resource_change";
+
+            addAudit.mutate({
+              batchId: batch.id,
+              action: "batch_move",
+              details: {
+                from_date: batch.planDate,
+                to_date: targetDate,
+                from_resource: oldResource?.resourceCode ?? batch.planResourceId,
+                to_resource: newResource?.resourceCode ?? targetResourceId,
+                direction,
+                reason: reason ?? null,
+                moved_by: user?.email ?? user?.id ?? "unknown",
+              },
+            });
+            toast.success(
+              `Moved ${batch.sapOrder} to ${newResource?.displayName ?? newResource?.resourceCode ?? "resource"} on ${targetDate}`,
+            );
+          },
+          onError: (err) => {
+            toast.error(
+              err instanceof Error ? err.message : "Failed to move batch",
+            );
+          },
+        },
+      );
+    },
+    [resources, updateBatch, addAudit, user],
+  );
+
+  const handleMoveConfirm = useCallback(
+    (reason: string) => {
+      if (!moveModal) return;
+      executeBatchMove(
+        moveModal.batch,
+        moveModal.targetResourceId,
+        moveModal.targetDate,
+        reason,
+      );
+      setMoveModal(null);
+    },
+    [moveModal, executeBatchMove],
+  );
+
   const colCount = dates.length;
 
   if (isLoading) {
@@ -157,7 +342,7 @@ export function ResourceTimeline({
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search batches…"
+              placeholder="Search batches\u2026"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-56 pl-9"
@@ -258,7 +443,13 @@ export function ResourceTimeline({
               highlightedBatchIds={
                 search ? highlightedBatchIds : undefined
               }
+              draggedBatchId={draggedBatch?.id ?? null}
+              dropTargets={dropTargets}
+              canDrag={canSchedule}
               onBatchClick={onBatchClick}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDrop={handleDrop}
             />
           ))}
 
@@ -272,6 +463,34 @@ export function ResourceTimeline({
           )}
         </div>
       </div>
+
+      {/* Move reason modal */}
+      {moveModal && (
+        <MoveReasonModal
+          open={!!moveModal}
+          onOpenChange={(open) => {
+            if (!open) setMoveModal(null);
+          }}
+          sapOrder={moveModal.batch.sapOrder}
+          oldDate={moveModal.batch.planDate ?? ""}
+          newDate={moveModal.targetDate}
+          oldResource={
+            resources.find((r) => r.id === moveModal.batch.planResourceId)
+              ?.displayName ??
+            resources.find((r) => r.id === moveModal.batch.planResourceId)
+              ?.resourceCode ??
+            "Unassigned"
+          }
+          newResource={
+            resources.find((r) => r.id === moveModal.targetResourceId)
+              ?.displayName ??
+            resources.find((r) => r.id === moveModal.targetResourceId)
+              ?.resourceCode ??
+            ""
+          }
+          onConfirm={handleMoveConfirm}
+        />
+      )}
     </div>
   );
 }

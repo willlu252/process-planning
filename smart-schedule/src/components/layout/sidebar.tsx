@@ -69,7 +69,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             isActive
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "text-sidebar-foreground/70",
-            collapsed ? "justify-center" : "px-3",
+            collapsed ? "justify-center px-0 gap-0" : "px-3",
           )
         }
       >

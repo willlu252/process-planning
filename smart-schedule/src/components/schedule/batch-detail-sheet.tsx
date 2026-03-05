@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -8,7 +9,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusBadge } from "./status-badge";
+import { StatusCommentModal } from "@/components/shared/status-comment-modal";
+import { AuditLog } from "@/components/shared/audit-log";
 import {
   Package,
   AlertTriangle,
@@ -19,9 +29,20 @@ import {
   FileText,
   Clock,
   User,
+  TrendingUp,
+  ShieldCheck,
+  History,
+  ShoppingCart,
 } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import { useBatch } from "@/hooks/use-batches";
+import { useUpdateBatch, useAddAuditEntry } from "@/hooks/use-batch-mutations";
+import { usePermissions } from "@/hooks/use-permissions";
+import { useCurrentSite } from "@/hooks/use-current-site";
+import { BATCH_STATUS_LIST, BATCH_STATUSES } from "@/lib/constants/statuses";
+import { COMMENT_REQUIRED_STATUSES } from "@/types/batch";
+import type { BatchStatus } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 
 interface BatchDetailSheetProps {
@@ -45,14 +66,14 @@ function DetailRow({
       {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <p className="text-sm">{value ?? "—"}</p>
+        <p className="text-sm">{value ?? "\u2014"}</p>
       </div>
     </div>
   );
 }
 
 function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return "—";
+  if (!dateStr) return "\u2014";
   try {
     return format(new Date(dateStr), "EEE d MMM yyyy, HH:mm");
   } catch {
@@ -61,7 +82,7 @@ function formatDateTime(dateStr: string | null): string {
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
+  if (!dateStr) return "\u2014";
   try {
     return format(new Date(dateStr), "EEE d MMM yyyy");
   } catch {
@@ -76,10 +97,85 @@ export function BatchDetailSheet({
   resources,
 }: BatchDetailSheetProps) {
   const { data: batch, isLoading } = useBatch(batchId);
+  const updateBatch = useUpdateBatch();
+  const addAudit = useAddAuditEntry();
+  const { hasPermission } = usePermissions();
+  const { user } = useCurrentSite();
+
+  const canEditStatus = hasPermission("batches.status");
+
+  // Status comment modal state
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<BatchStatus | null>(null);
 
   const resource = batch?.planResourceId
     ? resources.find((r) => r.id === batch.planResourceId)
     : null;
+
+  const handleStatusChange = (newStatus: string) => {
+    if (!batch) return;
+    const status = newStatus as BatchStatus;
+    if (status === batch.status) return;
+
+    if (COMMENT_REQUIRED_STATUSES.includes(status)) {
+      setPendingStatus(status);
+      setCommentModalOpen(true);
+      return;
+    }
+
+    // Direct status change (no comment required)
+    updateBatch.mutate(
+      { batchId: batch.id, updates: { status } },
+      {
+        onSuccess: () => {
+          addAudit.mutate({
+            batchId: batch.id,
+            action: "status_change",
+            details: {
+              from: batch.status,
+              to: status,
+              changed_by: user?.email ?? user?.id ?? "unknown",
+            },
+          });
+          toast.success(`Status changed to ${status}`);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Failed to update status");
+        },
+      },
+    );
+  };
+
+  const handleCommentConfirm = (comment: string) => {
+    if (!batch || !pendingStatus) return;
+
+    updateBatch.mutate(
+      {
+        batchId: batch.id,
+        updates: { status: pendingStatus, statusComment: comment },
+      },
+      {
+        onSuccess: () => {
+          addAudit.mutate({
+            batchId: batch.id,
+            action: "status_change",
+            details: {
+              from: batch.status,
+              to: pendingStatus,
+              comment,
+              changed_by: user?.email ?? user?.id ?? "unknown",
+            },
+          });
+          toast.success(`Status changed to ${pendingStatus}`);
+          setCommentModalOpen(false);
+          setPendingStatus(null);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Failed to update status");
+        },
+      },
+    );
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -95,7 +191,31 @@ export function BatchDetailSheet({
             <SheetHeader>
               <div className="flex items-center gap-3">
                 <SheetTitle>Batch {batch.sapOrder}</SheetTitle>
-                <StatusBadge status={batch.status} />
+                {canEditStatus ? (
+                  <Select
+                    value={batch.status}
+                    onValueChange={handleStatusChange}
+                    disabled={updateBatch.isPending}
+                  >
+                    <SelectTrigger className="h-7 w-auto gap-1 border-0 px-0 focus:ring-0">
+                      <SelectValue>
+                        <StatusBadge status={batch.status} />
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BATCH_STATUS_LIST.map((s) => {
+                        const cfg = BATCH_STATUSES[s];
+                        return (
+                          <SelectItem key={s} value={s}>
+                            <span className={cfg.textClass}>{cfg.label}</span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <StatusBadge status={batch.status} />
+                )}
               </div>
               <SheetDescription>
                 {batch.materialDescription ?? "No description"}
@@ -160,7 +280,7 @@ export function BatchDetailSheet({
                   {resource && batch.batchVolume != null && (
                     <div className="ml-7 text-xs text-muted-foreground">
                       Capacity: {resource.minCapacity?.toLocaleString() ?? "?"}L
-                      — {resource.maxCapacity?.toLocaleString() ?? "?"}L
+                      {" \u2014 "}{resource.maxCapacity?.toLocaleString() ?? "?"}L
                       {resource.maxCapacity != null &&
                         batch.batchVolume > resource.maxCapacity && (
                           <span className="ml-2 font-semibold text-red-500">
@@ -189,6 +309,101 @@ export function BatchDetailSheet({
                   <DetailRow label="Colour Group" value={batch.sapColorGroup} />
                 </div>
               </div>
+
+              {/* Coverage & stock */}
+              {(batch.stockCover != null || batch.safetyStock != null || batch.forecast != null) && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Coverage</h3>
+                    <div className="grid gap-1">
+                      <DetailRow
+                        icon={TrendingUp}
+                        label="Stock Cover"
+                        value={batch.stockCover != null ? `${batch.stockCover} weeks` : null}
+                      />
+                      <DetailRow
+                        label="Safety Stock"
+                        value={batch.safetyStock != null ? batch.safetyStock.toLocaleString() : null}
+                      />
+                      <DetailRow
+                        label="Forecast"
+                        value={batch.forecast != null ? batch.forecast.toLocaleString() : null}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Purchase orders */}
+              {(batch.poDate || batch.poQuantity != null) && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Purchase Order</h3>
+                    <div className="grid gap-1">
+                      <DetailRow
+                        icon={ShoppingCart}
+                        label="PO Date"
+                        value={formatDate(batch.poDate)}
+                      />
+                      <DetailRow
+                        label="PO Quantity"
+                        value={batch.poQuantity != null ? batch.poQuantity.toLocaleString() : null}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Vetting */}
+              {batch.vettingStatus !== "not_required" && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Vetting</h3>
+                    <div className="grid gap-1">
+                      <DetailRow
+                        icon={ShieldCheck}
+                        label="Vetting Status"
+                        value={
+                          <Badge
+                            variant="outline"
+                            className={
+                              batch.vettingStatus === "approved"
+                                ? "border-emerald-300 text-emerald-700"
+                                : batch.vettingStatus === "rejected"
+                                  ? "border-red-300 text-red-700"
+                                  : "border-amber-300 text-amber-700"
+                            }
+                          >
+                            {batch.vettingStatus}
+                          </Badge>
+                        }
+                      />
+                      {batch.vettedBy && (
+                        <DetailRow
+                          icon={User}
+                          label="Vetted By"
+                          value={batch.vettedBy}
+                        />
+                      )}
+                      {batch.vettedAt && (
+                        <DetailRow
+                          icon={Clock}
+                          label="Vetted At"
+                          value={formatDateTime(batch.vettedAt)}
+                        />
+                      )}
+                      {batch.vettingComment && (
+                        <div className="ml-7 rounded-md bg-muted p-2 text-sm">
+                          {batch.vettingComment}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* QC observation */}
               {batch.qcObservedStage && (
@@ -242,7 +457,32 @@ export function BatchDetailSheet({
                   <DetailRow label="Job Location" value={batch.jobLocation} />
                 </>
               )}
+
+              {/* Audit trail */}
+              <Separator />
+              <div>
+                <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                  <History className="h-4 w-4" />
+                  Activity
+                </h3>
+                <AuditLog batchId={batch.id} />
+              </div>
             </div>
+
+            {/* Status comment modal */}
+            {pendingStatus && (
+              <StatusCommentModal
+                open={commentModalOpen}
+                onOpenChange={(open) => {
+                  setCommentModalOpen(open);
+                  if (!open) setPendingStatus(null);
+                }}
+                batchId={batch.id}
+                sapOrder={batch.sapOrder}
+                newStatus={pendingStatus}
+                onConfirm={handleCommentConfirm}
+              />
+            )}
           </>
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">

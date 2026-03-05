@@ -11,13 +11,29 @@ import type { Batch } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 import type { ResourceBlock } from "@/types/site";
 
+export interface DropTarget {
+  resourceId: string;
+  date: string;
+  valid: boolean;
+  warning?: string;
+}
+
 interface ResourceLaneProps {
   resource: Resource;
   dates: string[];
   batches: Batch[];
   blocks: ResourceBlock[];
   highlightedBatchIds?: Set<string>;
+  draggedBatchId?: string | null;
+  dragOver?: DropTarget | null;
+  dropTargets?: Map<string, DropTarget>;
+  canDrag?: boolean;
   onBatchClick?: (batch: Batch) => void;
+  onDragStart?: (batch: Batch, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (resourceId: string, date: string, e: React.DragEvent) => void;
+  onDragLeave?: () => void;
+  onDrop?: (resourceId: string, date: string) => void;
 }
 
 function CapacityBar({
@@ -68,13 +84,25 @@ function CapacityBar({
   );
 }
 
+function getCellKey(resourceId: string, date: string) {
+  return `${resourceId}:${date}`;
+}
+
 export function ResourceLane({
   resource,
   dates,
   batches,
   blocks,
   highlightedBatchIds,
+  draggedBatchId,
+  dropTargets,
+  canDrag = false,
   onBatchClick,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: ResourceLaneProps) {
   // Group batches by date
   const batchesByDate = useMemo(() => {
@@ -115,9 +143,9 @@ export function ResourceLane({
           {resource.displayName ?? resource.resourceCode}
         </span>
         <span className="text-[10px] text-muted-foreground">
-          {resource.trunkLine && `Trunk ${resource.trunkLine} · `}
+          {resource.trunkLine && `Trunk ${resource.trunkLine} \u00B7 `}
           {resource.minCapacity != null && resource.maxCapacity != null
-            ? `${resource.minCapacity.toLocaleString()}–${resource.maxCapacity.toLocaleString()}L`
+            ? `${resource.minCapacity.toLocaleString()}\u2013${resource.maxCapacity.toLocaleString()}L`
             : resource.resourceType}
         </span>
       </div>
@@ -131,10 +159,46 @@ export function ResourceLane({
           0,
         );
 
+        // Get drop target state for this cell
+        const cellKey = getCellKey(resource.id, date);
+        const target = draggedBatchId ? dropTargets?.get(cellKey) : undefined;
+        const isDragging = !!draggedBatchId;
+
+        // Determine cell highlighting classes when dragging
+        let dragCellClass = "";
+        if (isDragging && target) {
+          if (target.valid) {
+            dragCellClass =
+              "border-2 border-dashed border-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30";
+          } else {
+            dragCellClass =
+              "border-2 border-dashed border-red-300 bg-red-50/30 dark:bg-red-950/20 opacity-75";
+          }
+        }
+
         return (
           <div
             key={date}
-            className="relative flex min-h-[80px] flex-col border-b border-r p-1.5"
+            className={cn(
+              "relative flex min-h-[80px] flex-col border-b border-r p-1.5 transition-colors",
+              dragCellClass,
+            )}
+            onDragOver={(e) => {
+              if (!isDragging || !target?.valid) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              onDragOver?.(resource.id, date, e);
+            }}
+            onDragEnter={(e) => {
+              if (!isDragging || !target?.valid) return;
+              e.preventDefault();
+            }}
+            onDragLeave={() => onDragLeave?.()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (!target?.valid) return;
+              onDrop?.(resource.id, date);
+            }}
           >
             {block && <BlockedOverlay reason={block.reason} />}
 
@@ -149,6 +213,13 @@ export function ResourceLane({
               </div>
             )}
 
+            {/* Warning tooltip for over-capacity drops */}
+            {isDragging && target?.valid && target.warning && (
+              <div className="mb-1 text-[9px] font-medium text-amber-600 dark:text-amber-400 text-center">
+                {target.warning}
+              </div>
+            )}
+
             {/* Batch cards */}
             <div className="flex flex-col gap-1">
               {dayBatches.map((batch) => (
@@ -157,7 +228,11 @@ export function ResourceLane({
                   batch={batch}
                   resource={resource}
                   isHighlighted={highlightedBatchIds?.has(batch.id)}
+                  isDragging={draggedBatchId === batch.id}
+                  draggable={canDrag}
                   onClick={onBatchClick}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
                 />
               ))}
             </div>
@@ -165,7 +240,7 @@ export function ResourceLane({
             {/* Empty state */}
             {dayBatches.length === 0 && !block && (
               <div className="flex flex-1 items-center justify-center text-[10px] text-muted-foreground/40">
-                —
+                {isDragging && target?.valid ? "Drop here" : "\u2014"}
               </div>
             )}
           </div>

@@ -13,7 +13,11 @@ interface BatchCardProps {
   batch: Batch;
   resource: Resource | undefined;
   isHighlighted?: boolean;
+  isDragging?: boolean;
+  draggable?: boolean;
   onClick?: (batch: Batch) => void;
+  onDragStart?: (batch: Batch, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
 }
 
 function getCardBorder(batch: Batch): string {
@@ -33,7 +37,11 @@ export function BatchCard({
   batch,
   resource,
   isHighlighted = false,
+  isDragging = false,
+  draggable = false,
   onClick,
+  onDragStart,
+  onDragEnd,
 }: BatchCardProps) {
   const isOverCapacity =
     resource &&
@@ -53,7 +61,17 @@ export function BatchCard({
         "group relative cursor-pointer rounded-md border px-2 py-1.5 text-xs transition-shadow hover:shadow-md",
         getCardBorder(batch),
         isHighlighted && "ring-2 ring-primary ring-offset-1",
+        isDragging && "opacity-50",
+        draggable && "cursor-grab active:cursor-grabbing",
       )}
+      draggable={draggable}
+      onDragStart={(e) => {
+        if (!draggable) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", batch.id);
+        onDragStart?.(batch, e);
+      }}
+      onDragEnd={() => onDragEnd?.()}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.(batch);
@@ -65,13 +83,13 @@ export function BatchCard({
         <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
           {batch.batchVolume != null
             ? `${batch.batchVolume.toLocaleString()}L`
-            : "—"}
+            : "\u2014"}
         </span>
       </div>
 
       {/* Material description */}
       <div className="mt-0.5 truncate text-muted-foreground leading-tight">
-        {batch.materialDescription ?? "—"}
+        {batch.materialDescription ?? "\u2014"}
       </div>
 
       {/* Alert indicators */}
