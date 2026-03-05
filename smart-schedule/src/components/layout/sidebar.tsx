@@ -64,16 +64,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         to={item.to}
         className={({ isActive }) =>
           cn(
-            "flex items-center gap-3 rounded-md py-2 text-sm font-medium transition-colors",
+            "flex items-center rounded-md text-sm font-medium transition-colors",
             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             isActive
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "text-sidebar-foreground/70",
-            collapsed ? "justify-center px-0 gap-0" : "px-3",
+            collapsed
+              ? "justify-center p-2.5"
+              : "gap-3 px-3 py-2",
           )
         }
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
         {!collapsed && <span>{item.label}</span>}
       </NavLink>
     );
@@ -97,11 +99,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <aside
         className={cn(
           "flex flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200",
-          collapsed ? "w-14" : "w-56",
+          collapsed ? "w-16" : "w-56",
         )}
       >
         {/* Logo / site name */}
-        <div className={cn("flex h-14 items-center gap-2 border-b px-3", collapsed && "justify-center")}>
+        <div className={cn("flex h-14 items-center border-b", collapsed ? "justify-center px-2" : "gap-2 px-3")}>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center">
             <img src={duluxLogo} alt="Dulux" className="h-7 w-7 object-contain" />
           </div>
@@ -120,7 +122,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-2">
+        <nav className={cn("flex-1 p-2", collapsed ? "space-y-2" : "space-y-1")}>
           {NAV_ITEMS.map(renderNavItem)}
 
           <Separator className="my-2" />
