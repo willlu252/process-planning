@@ -13,12 +13,10 @@ import {
   Shield,
   Building2,
   PanelLeftClose,
-  PanelLeft,
 } from "lucide-react";
 import duluxLogo from "@/assets/dulux-logo.png";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -58,97 +56,71 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
     const Icon = item.icon;
 
-    const link = (
+    return (
       <NavLink
         key={item.to}
         to={item.to}
         className={({ isActive }) =>
           cn(
-            "flex items-center rounded-md text-sm font-medium transition-colors",
+            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             isActive
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "text-sidebar-foreground/70",
-            collapsed
-              ? "justify-center w-full p-2.5"
-              : "gap-3 px-3 py-2",
           )
         }
       >
-        <Icon className={cn("shrink-0", collapsed ? "h-5 w-5" : "h-4 w-4")} />
-        {!collapsed && <span>{item.label}</span>}
+        <Icon className="h-4 w-4 shrink-0" />
+        <span>{item.label}</span>
       </NavLink>
     );
-
-    if (collapsed) {
-      return (
-        <Tooltip key={item.to} delayDuration={0}>
-          <TooltipTrigger asChild>{link}</TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            {item.label}
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    return link;
   };
 
   return (
-    <TooltipProvider>
-      <aside
-        className={cn(
-          "flex flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200",
-          collapsed ? "w-16" : "w-56",
-        )}
-      >
-        {/* Logo / site name */}
-        <div className={cn("flex h-14 items-center border-b", collapsed ? "justify-center px-2" : "gap-2 px-3")}>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-            <img src={duluxLogo} alt="Dulux" className="h-7 w-7 object-contain" />
-          </div>
-          {!collapsed && (
-            <div className="flex flex-col overflow-hidden">
-              <span className="truncate text-sm font-semibold">
-                {site?.name ?? "Smart Schedule"}
-              </span>
-              {site?.code && (
-                <span className="truncate text-xs text-sidebar-foreground/50">
-                  {site.code}
-                </span>
-              )}
-            </div>
+    <aside
+      className={cn(
+        "flex flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200 overflow-hidden",
+        collapsed ? "w-0 border-r-0" : "w-56",
+      )}
+    >
+      {/* Logo / site name */}
+      <div className="flex h-14 items-center gap-2 border-b px-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+          <img src={duluxLogo} alt="Dulux" className="h-7 w-7 object-contain" />
+        </div>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <span className="truncate text-sm font-semibold">
+            {site?.name ?? "Smart Schedule"}
+          </span>
+          {site?.code && (
+            <span className="truncate text-xs text-sidebar-foreground/50">
+              {site.code}
+            </span>
           )}
         </div>
+      </div>
 
-        {/* Navigation */}
-        <nav className={cn("flex-1 p-2", collapsed ? "space-y-2" : "space-y-1")}>
-          {NAV_ITEMS.map(renderNavItem)}
+      {/* Navigation */}
+      <nav className="flex-1 space-y-1 p-2">
+        {NAV_ITEMS.map(renderNavItem)}
 
-          <Separator className="my-2" />
+        <Separator className="my-2" />
 
-          {ADMIN_ITEMS.map(renderNavItem)}
-        </nav>
+        {ADMIN_ITEMS.map(renderNavItem)}
+      </nav>
 
-        {/* Collapse toggle */}
-        <div className="border-t p-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn("w-full", collapsed ? "justify-center" : "justify-start")}
-            onClick={onToggle}
-          >
-            {collapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <>
-                <PanelLeftClose className="mr-2 h-4 w-4" />
-                <span className="text-xs">Collapse</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </aside>
-    </TooltipProvider>
+      {/* Collapse toggle */}
+      <div className="border-t p-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start"
+          onClick={onToggle}
+        >
+          <PanelLeftClose className="mr-2 h-4 w-4" />
+          <span className="text-xs">Collapse</span>
+        </Button>
+      </div>
+    </aside>
   );
 }

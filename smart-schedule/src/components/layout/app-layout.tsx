@@ -33,7 +33,7 @@ export function AppLayout() {
     <div className="flex h-screen overflow-hidden">
       <Sidebar collapsed={collapsed} onToggle={handleToggle} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
+        <Header sidebarCollapsed={collapsed} onToggleSidebar={handleToggle} />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

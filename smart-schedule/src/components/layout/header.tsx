@@ -16,12 +16,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Wifi, WifiOff, LogOut } from "lucide-react";
+import { Wifi, WifiOff, LogOut, PanelLeft } from "lucide-react";
 import { SiteSwitcher } from "./site-switcher";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationPanel } from "@/components/notifications/notification-panel";
 
-export function Header() {
+interface HeaderProps {
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+}
+
+export function Header({ sidebarCollapsed, onToggleSidebar }: HeaderProps = {}) {
   const { signOut } = useAuth();
   const { user, site } = useCurrentSite();
   const { isSuperAdmin } = usePermissions();
@@ -48,8 +53,14 @@ export function Header() {
   return (
     <TooltipProvider>
       <header className="flex h-14 items-center justify-between border-b bg-background px-4">
-        {/* Left: site context / breadcrumb */}
+        {/* Left: sidebar toggle + site context */}
         <div className="flex items-center gap-3">
+          {sidebarCollapsed && onToggleSidebar && (
+            <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="h-8 w-8">
+              <PanelLeft className="h-4 w-4" />
+              <span className="sr-only">Open sidebar</span>
+            </Button>
+          )}
           {isSuperAdmin && <SiteSwitcher />}
           {!isSuperAdmin && site && (
             <span className="text-sm font-medium text-muted-foreground">
