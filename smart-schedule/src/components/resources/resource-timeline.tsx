@@ -8,16 +8,20 @@ import { cn } from "@/lib/ui/cn";
 import { Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { ResourceLane, type DropTarget } from "./resource-lane";
+import { PlacementOverlay } from "./placement-overlay";
+import { RescheduleDialog } from "./reschedule-dialog";
 import { MoveReasonModal } from "@/components/shared/move-reason-modal";
 import { useUpdateBatch, useAddAuditEntry } from "@/hooks/use-batch-mutations";
+import { useRecordMovement } from "@/hooks/use-schedule-movements";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useCurrentSite } from "@/hooks/use-current-site";
-import { useScheduleRules } from "@/hooks/use-rules";
+import { useScheduleRules, useSubstitutionRules } from "@/hooks/use-rules";
 import { useColourGroups, useColourTransitions } from "@/hooks/use-colour-groups";
 import { evaluateDropTarget } from "@/lib/utils/rule-evaluator";
 import type { Batch } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 import type { ResourceBlock } from "@/types/site";
+import type { PlacementScore } from "@/types/scoring";
 
 type ResourceTab = "mixers" | "dispersers" | "all";
 
@@ -63,17 +67,25 @@ export function ResourceTimeline({
     targetDate: string;
   } | null>(null);
 
+  // Placement overlay state (Move button flow)
+  const [movingBatch, setMovingBatch] = useState<Batch | null>(null);
+
+  // Reschedule dialog state (WOM/WOP batches)
+  const [reschedulingBatch, setReschedulingBatch] = useState<Batch | null>(null);
+
   const updateBatch = useUpdateBatch();
   const addAudit = useAddAuditEntry();
+  const recordMovement = useRecordMovement();
   const { hasPermission } = usePermissions();
   const { user } = useCurrentSite();
 
-  // Schedule rules & colour data for drag-drop validation
-  const { data: scheduleRules } = useScheduleRules();
-  const { data: colourGroups } = useColourGroups();
-  const { data: colourTransitions } = useColourTransitions();
+  // Schedule rules & colour data for drag-drop validation + scoring
+  const { data: scheduleRules = [] } = useScheduleRules();
+  const { data: colourGroups = [] } = useColourGroups();
+  const { data: colourTransitions = [] } = useColourTransitions();
+  const { data: substitutionRules = [] } = useSubstitutionRules();
   const enabledRules = useMemo(
-    () => (scheduleRules ?? []).filter((r) => r.enabled),
+    () => scheduleRules.filter((r) => r.enabled),
     [scheduleRules],
   );
 
@@ -161,8 +173,8 @@ export function ResourceTimeline({
           targetDate: date,
           existingBatches: cellBatches,
           rules: enabledRules,
-          colourGroups: colourGroups ?? [],
-          colourTransitions: colourTransitions ?? [],
+          colourGroups,
+          colourTransitions,
         });
 
         targets.set(key, {
@@ -223,6 +235,8 @@ export function ResourceTimeline({
   // Drag handlers
   const handleDragStart = useCallback((batch: Batch) => {
     setDraggedBatch(batch);
+    // Cancel any active overlay
+    setMovingBatch(null);
   }, []);
 
   const handleDragEnd = useCallback(() => {
@@ -295,6 +309,25 @@ export function ResourceTimeline({
                 moved_by: user?.email ?? user?.id ?? "unknown",
               },
             });
+
+            // Record in schedule_movements table
+            const movementDirection: "pulled" | "pushed" | "moved" =
+              dateChanged && targetDate < (batch.planDate ?? "")
+                ? "pulled"
+                : dateChanged
+                  ? "pushed"
+                  : "moved";
+
+            recordMovement.mutate({
+              batchId: batch.id,
+              fromResourceId: batch.planResourceId,
+              toResourceId: targetResourceId,
+              fromDate: batch.planDate,
+              toDate: targetDate,
+              direction: movementDirection,
+              reason: reason ?? null,
+            });
+
             toast.success(
               `Moved ${batch.sapOrder} to ${newResource?.displayName ?? newResource?.resourceCode ?? "resource"} on ${targetDate}`,
             );
@@ -307,7 +340,7 @@ export function ResourceTimeline({
         },
       );
     },
-    [resources, updateBatch, addAudit, user],
+    [resources, updateBatch, addAudit, recordMovement, user],
   );
 
   const handleMoveConfirm = useCallback(
@@ -322,6 +355,63 @@ export function ResourceTimeline({
       setMoveModal(null);
     },
     [moveModal, executeBatchMove],
+  );
+
+  // Placement overlay: triggered by Move button on BatchCard
+  const handleMoveStart = useCallback(
+    (batch: Batch) => {
+      if (!canSchedule) return;
+      setMovingBatch(batch);
+      // Cancel any drag
+      setDraggedBatch(null);
+    },
+    [canSchedule],
+  );
+
+  const handleOverlayCellClick = useCallback(
+    (resourceId: string, date: string, _score: PlacementScore) => {
+      if (!movingBatch) return;
+
+      const dateChanged = movingBatch.planDate !== date;
+      const resourceChanged = movingBatch.planResourceId !== resourceId;
+
+      if (!dateChanged && !resourceChanged) {
+        setMovingBatch(null);
+        return;
+      }
+
+      // If date changed, require a reason via modal
+      if (dateChanged) {
+        setMoveModal({
+          batch: movingBatch,
+          targetResourceId: resourceId,
+          targetDate: date,
+        });
+        setMovingBatch(null);
+        return;
+      }
+
+      // Resource-only move — execute directly
+      executeBatchMove(movingBatch, resourceId, date);
+      setMovingBatch(null);
+    },
+    [movingBatch, executeBatchMove],
+  );
+
+  const handleOverlayCancel = useCallback(() => {
+    setMovingBatch(null);
+  }, []);
+
+  // Reschedule: triggered by Reschedule button on WOM/WOP batch cards
+  const handleRescheduleStart = useCallback(
+    (batch: Batch) => {
+      if (!canSchedule) return;
+      setReschedulingBatch(batch);
+      // Cancel any active overlay or drag
+      setMovingBatch(null);
+      setDraggedBatch(null);
+    },
+    [canSchedule],
   );
 
   const colCount = dates.length;
@@ -358,6 +448,22 @@ export function ResourceTimeline({
         </Tabs>
 
         <div className="flex items-center gap-2">
+          {/* Move mode indicator */}
+          {movingBatch && (
+            <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary">
+              <span>Moving {movingBatch.sapOrder}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-4 w-4"
+                onClick={() => setMovingBatch(null)}
+                aria-label="Cancel move"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
+
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -411,8 +517,8 @@ export function ResourceTimeline({
                 key={dateStr}
                 className={cn(
                   "sticky top-0 z-30 border-b border-r px-2 py-2 text-center bg-card",
-                  today && "!bg-blue-50 dark:!bg-blue-950",
-                  weekend && "!bg-muted",
+                  today && "bg-primary/5 ring-1 ring-inset ring-primary/15",
+                  weekend && "bg-muted",
                 )}
               >
                 <div className="text-xs font-semibold">
@@ -421,7 +527,7 @@ export function ResourceTimeline({
                 <div
                   className={cn(
                     "text-sm tabular-nums",
-                    today && "font-bold text-primary",
+                    today && "font-semibold text-foreground",
                   )}
                 >
                   {format(date, "d MMM")}
@@ -450,8 +556,25 @@ export function ResourceTimeline({
             );
           })}
 
-          {/* Resource lanes */}
-          {filteredResources.map((resource) => (
+          {/* Placement overlay (shown when a batch is being moved via Move button) */}
+          {movingBatch && (
+            <PlacementOverlay
+              movingBatch={movingBatch}
+              resources={filteredResources}
+              dates={dates}
+              batches={batches}
+              blocks={blocks}
+              colourGroups={colourGroups}
+              colourTransitions={colourTransitions}
+              substitutionRules={substitutionRules}
+              scheduleRules={scheduleRules}
+              onCellClick={handleOverlayCellClick}
+              onCancel={handleOverlayCancel}
+            />
+          )}
+
+          {/* Resource lanes (hidden when overlay is active) */}
+          {!movingBatch && filteredResources.map((resource) => (
             <ResourceLane
               key={resource.id}
               resource={resource}
@@ -464,10 +587,13 @@ export function ResourceTimeline({
               draggedBatchId={draggedBatch?.id ?? null}
               dropTargets={dropTargets}
               canDrag={canSchedule}
+              canSchedule={canSchedule}
               onBatchClick={onBatchClick}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onDrop={handleDrop}
+              onMoveStart={handleMoveStart}
+              onReschedule={handleRescheduleStart}
             />
           ))}
 
@@ -507,6 +633,24 @@ export function ResourceTimeline({
             ""
           }
           onConfirm={handleMoveConfirm}
+        />
+      )}
+
+      {/* Reschedule dialog for WOM/WOP batches */}
+      {reschedulingBatch && (
+        <RescheduleDialog
+          open={!!reschedulingBatch}
+          onOpenChange={(open) => {
+            if (!open) setReschedulingBatch(null);
+          }}
+          batch={reschedulingBatch}
+          resources={resources}
+          batches={batches}
+          blocks={blocks}
+          colourGroups={colourGroups}
+          colourTransitions={colourTransitions}
+          substitutionRules={substitutionRules}
+          scheduleRules={scheduleRules}
         />
       )}
     </div>

@@ -7,14 +7,20 @@ import { Button } from "@/components/ui/button";
 import { WeekSelector } from "@/components/schedule/week-selector";
 import { ResourceTimeline } from "@/components/resources/resource-timeline";
 import { BatchDetailSheet } from "@/components/schedule/batch-detail-sheet";
+import { RescheduleDialog } from "@/components/resources/reschedule-dialog";
 import { AlertManager } from "@/components/alerts/alert-manager";
 import { PermissionGate } from "@/components/shared/permission-gate";
+import { ScheduleHealthBar } from "@/components/shared/schedule-health-bar";
 import { Wand2 } from "lucide-react";
 import { useWeek } from "@/hooks/use-week";
 import { useBatches } from "@/hooks/use-batches";
 import { useResources } from "@/hooks/use-resources";
 import { useResourceBlocks } from "@/hooks/use-resource-blocks";
 import { useBulkAssignResources } from "@/hooks/use-batch-mutations";
+import { useHealthReport } from "@/hooks/use-health-report";
+import { useAiScans, useTriggerScan } from "@/hooks/use-ai-scans";
+import { useColourGroups, useColourTransitions } from "@/hooks/use-colour-groups";
+import { useSubstitutionRules, useScheduleRules } from "@/hooks/use-rules";
 import { assignBatchToResource } from "@/lib/utils/resource-assignment";
 import type { Batch } from "@/types/batch";
 import type { ImportBatch } from "@/hooks/use-import";
@@ -42,8 +48,28 @@ export function ResourcesPage() {
 
   const bulkAssign = useBulkAssignResources();
 
+  const { report: healthReport, isLoading: healthLoading } = useHealthReport({
+    weekStart: weekStartStr,
+    weekEnding: week.weekEndingStr,
+  });
+
+  const { data: aiScans = [] } = useAiScans(1);
+  const latestCompletedScan = aiScans.find((s) => s.status === "completed");
+
+  const triggerScan = useTriggerScan();
+  const handleRunAnalysis = useCallback(() => {
+    triggerScan.mutate("schedule_optimization");
+  }, [triggerScan]);
+
+  // Scoring context data for RescheduleDialog
+  const { data: colourGroups = [] } = useColourGroups();
+  const { data: colourTransitions = [] } = useColourTransitions();
+  const { data: substitutionRules = [] } = useSubstitutionRules();
+  const { data: scheduleRules = [] } = useScheduleRules();
+
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [reschedulingBatch, setReschedulingBatch] = useState<Batch | null>(null);
 
   const unassignedBatches = useMemo(
     () => batches.filter((b) => !b.planResourceId),
@@ -110,6 +136,16 @@ export function ResourcesPage() {
     setSheetOpen(true);
   }, []);
 
+  const handleRescheduleFromSheet = useCallback(
+    (batchId: string) => {
+      const batch = batches.find((b) => b.id === batchId);
+      if (batch) {
+        setReschedulingBatch(batch);
+      }
+    },
+    [batches],
+  );
+
   useEffect(() => {
     if (!deepLinkBatchId) return;
     setSelectedBatchId(deepLinkBatchId);
@@ -153,6 +189,14 @@ export function ResourcesPage() {
         }
       />
 
+      <ScheduleHealthBar
+        report={healthReport}
+        isLoading={healthLoading}
+        onRunAnalysis={handleRunAnalysis}
+        isAnalysing={triggerScan.isPending}
+        aiScanReport={latestCompletedScan?.report}
+      />
+
       <PermissionGate permission="alerts.read">
         <AlertManager mode="banner" activeOnly />
       </PermissionGate>
@@ -172,7 +216,26 @@ export function ResourcesPage() {
         open={sheetOpen}
         onOpenChange={handleSheetOpenChange}
         resources={resources}
+        onReschedule={handleRescheduleFromSheet}
       />
+
+      {/* Reschedule dialog triggered from BatchDetailSheet */}
+      {reschedulingBatch && (
+        <RescheduleDialog
+          open={!!reschedulingBatch}
+          onOpenChange={(open) => {
+            if (!open) setReschedulingBatch(null);
+          }}
+          batch={reschedulingBatch}
+          resources={resources}
+          batches={batches}
+          blocks={blocks}
+          colourGroups={colourGroups}
+          colourTransitions={colourTransitions}
+          substitutionRules={substitutionRules}
+          scheduleRules={scheduleRules}
+        />
+      )}
     </div>
   );
 }

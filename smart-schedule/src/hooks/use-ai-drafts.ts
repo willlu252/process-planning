@@ -188,6 +188,51 @@ export function useRejectDraft() {
 /*  useApplyDraft                                                      */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  useCreateDraft — insert a new draft for review                     */
+/* ------------------------------------------------------------------ */
+
+export function useCreateDraft() {
+  const { site } = useCurrentSite();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (draft: {
+      draftType: DraftType;
+      title: string;
+      description: string;
+      payload: Json;
+      scanId?: string | null;
+    }) => {
+      if (!site) throw new Error("No site selected");
+
+      const { data, error } = await supabase
+        .from("ai_drafts")
+        .insert({
+          site_id: site.id,
+          draft_type: draft.draftType,
+          title: draft.title,
+          description: draft.description,
+          payload: draft.payload,
+          status: "pending" as const,
+          scan_id: draft.scanId ?? null,
+        })
+        .select("id")
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai_drafts", site?.id] });
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  useApplyDraft                                                      */
+/* ------------------------------------------------------------------ */
+
 export function useApplyDraft() {
   const { site } = useCurrentSite();
   const queryClient = useQueryClient();

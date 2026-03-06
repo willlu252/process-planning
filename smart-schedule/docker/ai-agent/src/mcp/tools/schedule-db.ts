@@ -6,6 +6,7 @@
  * All queries are scoped to the configured site_id.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { scoringTools, handleScoringTool } from './scoring.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ type ToolHandler = (
 
 // ─── Tool Definitions ───────────────────────────────────────────────────────
 
-export const scheduleDbTools: ToolDefinition[] = [
+const baseScheduleDbTools: ToolDefinition[] = [
   {
     name: 'query_batches',
     description:
@@ -47,6 +48,14 @@ export const scheduleDbTools: ToolDefinition[] = [
         resource_id: {
           type: 'string',
           description: 'Filter by assigned resource UUID',
+        },
+        rm_available: {
+          type: 'boolean',
+          description: 'Filter by raw material availability. Set false to find WOM (Waiting On Materials) batches.',
+        },
+        packaging_available: {
+          type: 'boolean',
+          description: 'Filter by packaging availability. Set false to find WOP (Waiting On Packaging) batches.',
         },
         limit: {
           type: 'number',
@@ -192,6 +201,15 @@ export const scheduleDbTools: ToolDefinition[] = [
   },
 ];
 
+/**
+ * Unified tool list consumed by the runtime spawner.
+ * Includes base schedule-db tools plus deterministic scoring tools.
+ */
+export const scheduleDbTools: ToolDefinition[] = [
+  ...baseScheduleDbTools,
+  ...scoringTools,
+];
+
 // ─── Tool Handlers ──────────────────────────────────────────────────────────
 
 const handlers: Record<string, ToolHandler> = {
@@ -220,6 +238,12 @@ const handlers: Record<string, ToolHandler> = {
     }
     if (typeof args.resource_id === 'string') {
       query = query.eq('plan_resource_id', args.resource_id);
+    }
+    if (typeof args.rm_available === 'boolean') {
+      query = query.eq('rm_available', args.rm_available);
+    }
+    if (typeof args.packaging_available === 'boolean') {
+      query = query.eq('packaging_available', args.packaging_available);
     }
 
     const { data, error } = await query;
@@ -420,6 +444,28 @@ const handlers: Record<string, ToolHandler> = {
   },
 };
 
+// ─── Context-Scoped Tool Getters ─────────────────────────────────────────────
+
+/** Scan-lifecycle tools that must NOT be exposed in the chat context. */
+const SCAN_ONLY_TOOLS = new Set(['update_scan_status']);
+
+/**
+ * Tools for the chat context.
+ * Excludes scan lifecycle tools (e.g. update_scan_status) that are irrelevant
+ * and potentially confusing for a conversational agent.
+ */
+export function getChatTools(): ToolDefinition[] {
+  return scheduleDbTools.filter((t) => !SCAN_ONLY_TOOLS.has(t.name));
+}
+
+/**
+ * Tools for the scan context.
+ * Includes all tools, including update_scan_status.
+ */
+export function getScanTools(): ToolDefinition[] {
+  return scheduleDbTools;
+}
+
 // ─── Handler Dispatch ───────────────────────────────────────────────────────
 
 /**
@@ -432,10 +478,12 @@ export async function handleScheduleDbTool(
   siteId: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   const handler = handlers[toolName];
-  if (!handler) {
-    return textResult(`Unknown schedule-db tool: ${toolName}`);
+  if (handler) {
+    return handler(args, supabase, siteId);
   }
-  return handler(args, supabase, siteId);
+
+  // Delegate deterministic scoring tools to their dedicated handler.
+  return handleScoringTool(toolName, args, supabase, siteId);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

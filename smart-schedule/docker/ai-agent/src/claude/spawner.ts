@@ -10,7 +10,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { scheduleDbTools, handleScheduleDbTool } from '../mcp/tools/schedule-db.js';
+import { getChatTools, getScanTools, handleScheduleDbTool } from '../mcp/tools/schedule-db.js';
 import { wikiTools, handleWikiTool } from '../mcp/tools/wiki-search.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -18,6 +18,8 @@ import { wikiTools, handleWikiTool } from '../mcp/tools/wiki-search.js';
 export interface SpawnConfig {
   /** Decrypted Anthropic API key */
   apiKey: string;
+  /** Credential type for SDK auth wiring */
+  keyType?: 'anthropic_api_key' | 'claude_auth_token';
   /** Supabase URL */
   supabaseUrl: string;
   /** Supabase service key */
@@ -38,6 +40,11 @@ export interface SpawnConfig {
   supabase?: SupabaseClient;
   /** Previous conversation messages for multi-turn context */
   conversationHistory?: Array<{ role: string; content: string }>;
+  /**
+   * Tool context: 'chat' exposes only user-facing tools (excludes scan lifecycle tools);
+   * 'scan' exposes all tools including update_scan_status. Defaults to 'chat'.
+   */
+  context?: 'chat' | 'scan';
 }
 
 export interface SpawnResult {
@@ -61,8 +68,9 @@ const MAX_AGENTIC_TURNS = 15;
 const wikiToolNames = new Set(wikiTools.map((t) => t.name));
 
 /** Convert MCP tool definitions to Anthropic API tool format. */
-function getAnthropicTools(): Anthropic.Messages.Tool[] {
-  return [...scheduleDbTools, ...wikiTools].map((tool) => ({
+function getAnthropicTools(context: 'chat' | 'scan' = 'chat'): Anthropic.Messages.Tool[] {
+  const dbTools = context === 'scan' ? getScanTools() : getChatTools();
+  return [...dbTools, ...wikiTools].map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema as Anthropic.Messages.Tool.InputSchema,
@@ -117,7 +125,7 @@ export async function* spawnClaudeAgentStreaming(
   config: SpawnConfig,
 ): AsyncGenerator<ClaudeMessage> {
   const client = new Anthropic({ apiKey: config.apiKey });
-  const tools = config.supabase ? getAnthropicTools() : undefined;
+  const tools = config.supabase ? getAnthropicTools(config.context ?? 'chat') : undefined;
   const maxTurns = config.maxTurns ?? MAX_AGENTIC_TURNS;
 
   const messages = buildMessages(
@@ -228,7 +236,7 @@ export async function* spawnClaudeAgentStreaming(
  */
 export async function spawnClaudeAgent(config: SpawnConfig): Promise<SpawnResult> {
   const client = new Anthropic({ apiKey: config.apiKey });
-  const tools = config.supabase ? getAnthropicTools() : undefined;
+  const tools = config.supabase ? getAnthropicTools(config.context ?? 'chat') : undefined;
   const maxTurns = config.maxTurns ?? MAX_AGENTIC_TURNS;
   const resultMessages: ClaudeMessage[] = [];
 
@@ -323,7 +331,6 @@ function getDefaultSystemPrompt(
     '- query_substitution_rules: Check resource substitution rules',
     '- get_schedule_summary: Get aggregate statistics',
     '- create_draft: Propose changes for human review (never applied automatically)',
-    '- update_scan_status: Update AI scan progress',
     '',
     'You also have access to a knowledge base (wiki):',
     '- search_wiki: Full-text search across site procedures, policies, and reference docs',

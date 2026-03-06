@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
@@ -147,8 +151,8 @@ function rateLimitMiddleware(req: Request, res: Response, next: NextFunction): v
 const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS ?? '30000', 10);
 
 function timeoutMiddleware(req: Request, res: Response, next: NextFunction): void {
-  // Skip timeout for SSE streaming endpoints
-  if (req.path === '/ai/chat') {
+  // Skip timeout for SSE streaming endpoints and long-running scans
+  if (req.path === '/ai/chat' || req.path === '/ai/scan') {
     next();
     return;
   }
@@ -283,6 +287,16 @@ app.get('/ai/health', async (_req: Request, res: Response) => {
     checks.credentials = 'check_failed';
   }
 
+  // Verify SDK package is importable and MCP server is bootable/listing tools
+  try {
+    await import('@anthropic-ai/claude-agent-sdk');
+    checks.sdk = 'ok';
+  } catch {
+    checks.sdk = 'missing';
+  }
+
+  checks.mcp = await checkMcpServerReadiness();
+
   const degraded = Object.values(checks).some(
     (v) => v !== 'ok' && v !== 'disabled' && v !== 'not_configured'
   );
@@ -297,6 +311,97 @@ app.get('/ai/health', async (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+async function checkMcpServerReadiness(): Promise<string> {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const distPath = path.resolve(__dirname, './mcp/server.js');
+  const srcPath = path.resolve(__dirname, './mcp/server.ts');
+  const tsxPath = path.resolve(process.cwd(), 'node_modules/.bin/tsx');
+
+  let command = process.execPath;
+  let args: string[] = [distPath];
+
+  if (!existsSync(distPath)) {
+    if (existsSync(srcPath) && existsSync(tsxPath)) {
+      command = tsxPath;
+      args = [srcPath];
+    } else {
+      return 'missing_script';
+    }
+  }
+
+  const child = spawn(command, args, {
+    env: {
+      ...process.env,
+      SUPABASE_URL,
+      SUPABASE_SERVICE_KEY,
+      MCP_SITE_ID: '00000000-0000-0000-0000-000000000000',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdoutBuffer = '';
+  let stderrBuffer = '';
+  let finished = false;
+
+  const timeout = setTimeout(() => {
+    if (!finished) child.kill('SIGKILL');
+  }, 5000);
+
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrBuffer += chunk.toString('utf-8');
+  });
+
+  function writeRpc(payload: object): void {
+    const json = JSON.stringify(payload);
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`);
+  }
+
+  return await new Promise<string>((resolve) => {
+    function done(status: string): void {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      child.kill('SIGTERM');
+      resolve(status);
+    }
+
+    child.on('error', () => done('spawn_failed'));
+    child.on('exit', (code) => {
+      if (finished) return;
+      done(code === 0 ? 'ok' : 'boot_failed');
+    });
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString('utf-8');
+
+      // Minimal readiness check: if MCP tools/list response returns scoring/schedule tools, it's ready.
+      if (
+        stdoutBuffer.includes('"method":"notifications/initialized"') ||
+        stdoutBuffer.includes('"tools"')
+      ) {
+        if (
+          stdoutBuffer.includes('"score_health"') &&
+          stdoutBuffer.includes('"query_batches"')
+        ) {
+          done('ok');
+          return;
+        }
+      }
+    });
+
+    writeRpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    writeRpc({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+
+    setTimeout(() => {
+      if (!finished) {
+        if (stderrBuffer.includes('is required')) done('env_error');
+        else done('timeout');
+      }
+    }, 1200);
+  });
+}
 
 // Protected routes — rate limit and timeout applied after auth
 app.use('/ai', authMiddleware);
@@ -331,12 +436,19 @@ const SCHEDULER_POLL_INTERVAL = parseInt(process.env.SCHEDULER_POLL_INTERVAL_MS 
  * In production, this triggers the Claude agent via the spawner.
  */
 async function defaultTaskExecutor(ctx: TaskExecutionContext): Promise<TaskExecutionResult> {
+  const recipientIds = (ctx.notifyUserIds && ctx.notifyUserIds.length > 0)
+    ? ctx.notifyUserIds
+    : ctx.createdBy
+      ? [ctx.createdBy]
+      : [];
+
   const result = await runClaudeScan({
     supabase: supabaseAdmin,
     supabaseUrl: runtimeConfig.supabaseUrl,
     supabaseServiceKey: runtimeConfig.supabaseServiceKey,
     siteId: ctx.siteId,
     scanType: ctx.taskType as 'schedule_optimization' | 'rule_analysis' | 'capacity_check' | 'full_audit',
+    promptOverride: ctx.customPrompt,
     triggeredBy: null,
     scheduledTaskId: ctx.taskId,
     currentKey: encryptionConfig.currentKey,
@@ -344,6 +456,13 @@ async function defaultTaskExecutor(ctx: TaskExecutionContext): Promise<TaskExecu
   });
 
   if (!result.success) {
+    await createTaskNotifications({
+      siteId: ctx.siteId,
+      userIds: recipientIds,
+      title: `Scheduled task failed: ${ctx.taskName}`,
+      message: result.error ?? 'Scheduled scan failed',
+      type: 'error',
+    });
     return {
       success: false,
       error: result.error ?? 'Scheduled scan failed',
@@ -357,7 +476,43 @@ async function defaultTaskExecutor(ctx: TaskExecutionContext): Promise<TaskExecu
     message: `Completed scheduled scan ${result.scanId ?? 'unknown'} for task ${ctx.taskId}`,
   });
 
+  await createTaskNotifications({
+    siteId: ctx.siteId,
+    userIds: recipientIds,
+    title: `Scheduled task completed: ${ctx.taskName}`,
+    message: `Scan ${result.scanId ?? 'unknown'} completed successfully.`,
+    type: 'info',
+  });
+
   return { success: true };
+}
+
+async function createTaskNotifications(input: {
+  siteId: string;
+  userIds: string[];
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'error';
+}): Promise<void> {
+  if (!input.userIds.length) return;
+
+  const rows = input.userIds.map((userId) => ({
+    site_id: input.siteId,
+    user_id: userId,
+    title: input.title,
+    message: input.message,
+    type: input.type,
+  }));
+
+  const { error } = await supabaseAdmin.from('notifications').insert(rows);
+  if (error) {
+    log({
+      timestamp: new Date().toISOString(),
+      level: 'warn',
+      message: `Failed to create scheduled-task notifications: ${error.message}`,
+      siteId: input.siteId,
+    });
+  }
 }
 
 let scheduler: SchedulerRunner | null = null;

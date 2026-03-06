@@ -20,11 +20,14 @@ export interface AiScheduledTask {
   lockTtlSeconds: number;
   retryMax: number;
   retryBackoffSeconds: number;
+  customPrompt: string | null;
+  notifyUserIds: string[];
   enabled: boolean;
   lastRunAt: string | null;
   nextRunAt: string | null;
   lastError: string | null;
   lastRunDurationMs: number | null;
+  createdBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,11 +45,14 @@ function mapAiTask(row: DatabaseRow["ai_scheduled_tasks"]): AiScheduledTask {
     lockTtlSeconds: row.lock_ttl_seconds,
     retryMax: row.retry_max,
     retryBackoffSeconds: row.retry_backoff_seconds,
+    customPrompt: row.custom_prompt,
+    notifyUserIds: row.notify_user_ids ?? [],
     enabled: row.enabled,
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
     lastError: row.last_error,
     lastRunDurationMs: row.last_run_duration_ms,
+    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -188,6 +194,8 @@ export interface AiTaskInput {
   lockTtlSeconds?: number;
   retryMax?: number;
   retryBackoffSeconds?: number;
+  customPrompt?: string | null;
+  notifyUserIds?: string[];
   enabled?: boolean;
 }
 
@@ -215,6 +223,8 @@ export function useCreateAiTask() {
           lock_ttl_seconds: input.lockTtlSeconds ?? 300,
           retry_max: input.retryMax ?? 3,
           retry_backoff_seconds: input.retryBackoffSeconds ?? 60,
+          custom_prompt: input.customPrompt?.trim() || null,
+          notify_user_ids: input.notifyUserIds ?? [],
           enabled: input.enabled ?? false,
           created_by: user?.id ?? null,
           updated_by: user?.id ?? null,
@@ -266,6 +276,8 @@ export function useUpdateAiTask() {
           lock_ttl_seconds: input.lockTtlSeconds ?? 300,
           retry_max: input.retryMax ?? 3,
           retry_backoff_seconds: input.retryBackoffSeconds ?? 60,
+          custom_prompt: input.customPrompt?.trim() || null,
+          notify_user_ids: input.notifyUserIds ?? [],
           enabled: input.enabled ?? false,
           updated_by: user?.id ?? null,
           updated_at: new Date().toISOString(),
@@ -358,6 +370,55 @@ export function useToggleAiTask() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to toggle task");
+    },
+  });
+}
+
+function getAiAgentUrl(): string {
+  return (import.meta.env.VITE_AI_AGENT_URL as string | undefined) ?? "";
+}
+
+async function getAccessToken(): Promise<string> {
+  const session = (await supabase.auth.getSession()).data.session;
+  if (!session) throw new Error("Not authenticated");
+  return session.access_token;
+}
+
+export function useRunAiTaskNow() {
+  const { site } = useCurrentSite();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (taskId: string) => {
+      if (!site) throw new Error("No site selected");
+      const token = await getAccessToken();
+
+      const res = await fetch(`${getAiAgentUrl()}/ai/admin/tasks/${taskId}/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ siteId: site.id }),
+      });
+
+      const payload = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(payload.error ?? `Failed to run task (${res.status})`);
+      }
+
+      return payload;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai_scheduled_tasks", site?.id] });
+      toast.success("Task run started");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to run task");
     },
   });
 }

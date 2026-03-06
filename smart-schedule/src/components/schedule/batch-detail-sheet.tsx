@@ -6,16 +6,12 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./status-badge";
+import { StatusSelect } from "@/components/shared/status-select";
 import { StatusCommentModal } from "@/components/shared/status-comment-modal";
 import { AuditLog } from "@/components/shared/audit-log";
 import {
@@ -23,6 +19,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Calendar,
+  CalendarClock,
   Beaker,
   Droplets,
   FileText,
@@ -39,7 +36,6 @@ import { useBatch } from "@/hooks/use-batches";
 import { useUpdateBatch, useAddAuditEntry } from "@/hooks/use-batch-mutations";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useCurrentSite } from "@/hooks/use-current-site";
-import { BATCH_STATUS_LIST, BATCH_STATUSES } from "@/lib/constants/statuses";
 import { COMMENT_REQUIRED_STATUSES } from "@/types/batch";
 import type { BatchStatus } from "@/types/batch";
 import type { Resource } from "@/types/resource";
@@ -49,6 +45,7 @@ interface BatchDetailSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   resources: Resource[];
+  onReschedule?: (batchId: string) => void;
 }
 
 function DetailRow({
@@ -94,6 +91,7 @@ export function BatchDetailSheet({
   open,
   onOpenChange,
   resources,
+  onReschedule,
 }: BatchDetailSheetProps) {
   const { data: batch, isLoading } = useBatch(batchId);
   const updateBatch = useUpdateBatch();
@@ -191,33 +189,11 @@ export function BatchDetailSheet({
               <div className="flex items-center gap-3">
                 <SheetTitle>Batch {batch.sapOrder}</SheetTitle>
                 {canEditStatus ? (
-                  <Select
+                  <StatusSelect
                     value={batch.status}
                     onValueChange={handleStatusChange}
                     disabled={updateBatch.isPending}
-                  >
-                    <SelectTrigger className="h-7 w-auto gap-1.5">
-                      <SelectValue>
-                        <StatusBadge status={batch.status} />
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BATCH_STATUS_LIST.map((s) => {
-                        const cfg = BATCH_STATUSES[s];
-                        return (
-                          <SelectItem key={s} value={s}>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: cfg.color }}
-                              />
-                              <span>{cfg.label}</span>
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
+                  />
                 ) : (
                   <StatusBadge status={batch.status} />
                 )}
@@ -230,18 +206,34 @@ export function BatchDetailSheet({
             <div className="mt-6 space-y-6">
               {/* Material alerts */}
               {(!batch.rmAvailable || !batch.packagingAvailable) ? (
-                <div className="flex flex-col gap-1.5">
-                  {!batch.rmAvailable && (
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-                      <span className="text-muted-foreground">Waiting on Materials</span>
-                    </div>
-                  )}
-                  {!batch.packagingAvailable && (
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <Package className="h-4 w-4 text-amber-500 shrink-0" />
-                      <span className="text-muted-foreground">Waiting on Packaging</span>
-                    </div>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {!batch.rmAvailable && (
+                      <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-700">
+                        <AlertTriangle className="mr-1 h-3 w-3" />
+                        Waiting on Materials
+                      </Badge>
+                    )}
+                    {!batch.packagingAvailable && (
+                      <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
+                        <Package className="mr-1 h-3 w-3" />
+                        Waiting on Packaging
+                      </Badge>
+                    )}
+                  </div>
+                  {hasPermission("batches.schedule") && onReschedule && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 border-orange-300 text-orange-700 hover:bg-orange-50"
+                      onClick={() => {
+                        onReschedule(batch.id);
+                        onOpenChange(false);
+                      }}
+                    >
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      Reschedule
+                    </Button>
                   )}
                 </div>
               ) : (

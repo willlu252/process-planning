@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/ui/cn";
 import { BATCH_STATUSES } from "@/lib/constants/statuses";
-import { AlertTriangle, Package, Eye } from "lucide-react";
+import { AlertTriangle, Package, Eye, Move, CalendarClock } from "lucide-react";
 import type { Batch } from "@/types/batch";
 import type { Resource } from "@/types/resource";
 
@@ -15,9 +15,12 @@ interface BatchCardProps {
   isHighlighted?: boolean;
   isDragging?: boolean;
   draggable?: boolean;
+  canSchedule?: boolean;
   onClick?: (batch: Batch) => void;
   onDragStart?: (batch: Batch, e: React.DragEvent) => void;
   onDragEnd?: () => void;
+  onMoveStart?: (batch: Batch) => void;
+  onReschedule?: (batch: Batch) => void;
 }
 
 function getCardStyle(batch: Batch): { className: string; borderLeftColor?: string } {
@@ -41,9 +44,12 @@ export function BatchCard({
   isHighlighted = false,
   isDragging = false,
   draggable = false,
+  canSchedule = false,
   onClick,
   onDragStart,
   onDragEnd,
+  onMoveStart,
+  onReschedule,
 }: BatchCardProps) {
   const isOverCapacity =
     resource &&
@@ -82,14 +88,52 @@ export function BatchCard({
         onClick?.(batch);
       }}
     >
-      {/* Top row: SAP order + volume */}
+      {/* Top row: SAP order + volume + move button */}
       <div className="flex items-center justify-between gap-1">
         <span className="font-semibold truncate">{batch.sapOrder}</span>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-          {batch.batchVolume != null
-            ? `${batch.batchVolume.toLocaleString()}L`
-            : "\u2014"}
-        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          {canSchedule && onReschedule && (!batch.rmAvailable || !batch.packagingAvailable) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="hidden group-hover:inline-flex items-center justify-center h-4 w-4 rounded hover:bg-orange-500/10 text-orange-500 hover:text-orange-600 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReschedule(batch);
+                  }}
+                  aria-label={`Reschedule batch ${batch.sapOrder}`}
+                >
+                  <CalendarClock className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Reschedule (WOM/WOP)</TooltipContent>
+            </Tooltip>
+          )}
+          {canSchedule && onMoveStart && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="hidden group-hover:inline-flex items-center justify-center h-4 w-4 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveStart(batch);
+                  }}
+                  aria-label={`Move batch ${batch.sapOrder}`}
+                >
+                  <Move className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Move to best placement</TooltipContent>
+            </Tooltip>
+          )}
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+            {batch.batchVolume != null
+              ? `${batch.batchVolume.toLocaleString()}L`
+              : "\u2014"}
+          </span>
+        </div>
       </div>
 
       {/* Material description */}

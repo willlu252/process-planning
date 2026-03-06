@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { FileUpload } from "@/components/planning/file-upload";
 import { ImportPreview } from "@/components/planning/import-preview";
@@ -6,6 +6,7 @@ import { CoverageTable } from "@/components/planning/coverage-table";
 import { StockHeatmap } from "@/components/planning/stock-heatmap";
 import { VettingPanel } from "@/components/planning/vetting-panel";
 import { DraftReviewPanel } from "@/components/ai/draft-review";
+import { ScheduleHealthBar } from "@/components/shared/schedule-health-bar";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -24,6 +25,8 @@ import { useResources } from "@/hooks/use-resources";
 import { useWeek } from "@/hooks/use-week";
 import { useCurrentSite } from "@/hooks/use-current-site";
 import { usePurgeSiteData } from "@/hooks/use-batch-mutations";
+import { useHealthReport } from "@/hooks/use-health-report";
+import { useAiScans, useTriggerScan } from "@/hooks/use-ai-scans";
 
 export function PlanningPage() {
   const {
@@ -43,6 +46,14 @@ export function PlanningPage() {
   const { weekEnding } = useWeek();
   const { user } = useCurrentSite();
   const purgeMutation = usePurgeSiteData();
+  const { report: healthReport, isLoading: healthLoading } = useHealthReport();
+  const { data: aiScans = [] } = useAiScans(1);
+  const latestCompletedScan = aiScans.find((s) => s.status === "completed");
+
+  const triggerScan = useTriggerScan();
+  const handleRunAnalysis = useCallback(() => {
+    triggerScan.mutate("schedule_optimization");
+  }, [triggerScan]);
   const [purgeOpen, setPurgeOpen] = useState(false);
 
   const isAdmin = user?.role === "site_admin" || user?.role === "super_admin";
@@ -87,6 +98,14 @@ export function PlanningPage() {
             </AlertDialog>
           ) : undefined
         }
+      />
+
+      <ScheduleHealthBar
+        report={healthReport}
+        isLoading={healthLoading}
+        onRunAnalysis={handleRunAnalysis}
+        isAnalysing={triggerScan.isPending}
+        aiScanReport={latestCompletedScan?.report}
       />
 
       <FileUpload

@@ -4,12 +4,12 @@ import Markdown from "react-markdown";
 import type { ChatMessage as ChatMessageType } from "@/hooks/use-ai-chat";
 
 const markdownClasses =
-  "prose prose-sm prose-neutral dark:prose-invert max-w-none " +
+  "prose prose-sm max-w-none text-foreground " +
   "prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 " +
-  "prose-headings:mt-3 prose-headings:mb-1 prose-headings:text-sm " +
+  "prose-headings:mt-3 prose-headings:mb-1 prose-headings:text-sm prose-headings:text-foreground " +
   "prose-code:text-xs prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded " +
   "prose-pre:bg-muted prose-pre:text-xs prose-pre:p-3 prose-pre:rounded-md " +
-  "prose-strong:font-semibold";
+  "prose-strong:font-semibold prose-strong:text-foreground";
 
 interface ChatMessageProps {
   message: ChatMessageType;

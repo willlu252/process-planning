@@ -111,8 +111,8 @@ export function AdminAiSettingsPage() {
                       <span className="text-sm text-muted-foreground">Type</span>
                       <span className="text-sm font-medium">
                         {config.keyType === "anthropic_api_key"
-                          ? "Anthropic API Key"
-                          : "Claude Auth Token"}
+                          ? "Service API Key"
+                          : "Agent Auth Token"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -271,8 +271,8 @@ export function AdminAiSettingsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="anthropic_api_key">Anthropic API Key</SelectItem>
-                  <SelectItem value="claude_auth_token">Claude Auth Token</SelectItem>
+                  <SelectItem value="anthropic_api_key">Service API Key</SelectItem>
+                  <SelectItem value="claude_auth_token">Agent Auth Token</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -282,8 +282,8 @@ export function AdminAiSettingsPage() {
                 type="password"
                 placeholder={
                   keyType === "anthropic_api_key"
-                    ? "sk-ant-api03-..."
-                    : "Token value..."
+                    ? "API key value..."
+                    : "Auth token value..."
                 }
                 value={credentialValue}
                 onChange={(e) => setCredentialValue(e.target.value)}

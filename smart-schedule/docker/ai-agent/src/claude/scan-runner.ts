@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decrypt } from '../security/crypto.js';
-import { spawnClaudeAgent, type ClaudeMessage } from './spawner.js';
+import { getAgentRunner } from '../agent/runner.js';
+import type { ClaudeMessage } from './spawner.js';
 import { assembleSystemPrompt } from './prompt-assembler.js';
 
 export interface ResolveCredentialOptions {
@@ -76,6 +77,7 @@ export interface RunClaudeScanOptions {
   supabaseServiceKey: string;
   siteId: string;
   scanType: 'schedule_optimization' | 'rule_analysis' | 'capacity_check' | 'full_audit';
+  promptOverride?: string | null;
   triggeredBy?: string | null;
   scheduledTaskId?: string | null;
   currentKey: string;
@@ -89,7 +91,13 @@ export interface RunClaudeScanResult {
   credentialError?: boolean;
 }
 
-function buildScanPrompt(scanType: RunClaudeScanOptions['scanType']): string {
+function buildScanPrompt(
+  scanType: RunClaudeScanOptions['scanType'],
+  promptOverride?: string | null,
+): string {
+  if (promptOverride && promptOverride.trim()) {
+    return promptOverride.trim();
+  }
   const objectiveMap: Record<RunClaudeScanOptions['scanType'], string> = {
     schedule_optimization: 'Find schedule bottlenecks and produce optimization recommendations.',
     rule_analysis: 'Review planning rules and identify conflicts or inefficiencies.',
@@ -152,15 +160,18 @@ export async function runClaudeScan(opts: RunClaudeScanOptions): Promise<RunClau
       .single();
     const siteName = siteRow?.name ?? undefined;
 
-    const spawnResult = await spawnClaudeAgent({
+    const runner = getAgentRunner();
+    const spawnResult = await runner.run({
       apiKey: cred.credential,
+      keyType: cred.keyType,
       supabaseUrl: opts.supabaseUrl,
       supabaseServiceKey: opts.supabaseServiceKey,
       siteId: opts.siteId,
-      prompt: buildScanPrompt(opts.scanType),
+      prompt: buildScanPrompt(opts.scanType, opts.promptOverride),
       systemPrompt: await assembleSystemPrompt({ supabase: opts.supabase, siteId: opts.siteId, siteName, context: 'scan' }),
       maxTurns: 8,
       supabase: opts.supabase,
+      context: 'scan',
     });
 
     const report = {

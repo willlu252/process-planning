@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,12 +35,15 @@ import {
 } from "@/components/ui/table";
 import { TimezoneSelect } from "@/components/ui/timezone-select";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useCurrentSite } from "@/hooks/use-current-site";
+import { supabase } from "@/lib/supabase/client";
 import {
   useAiScheduledTasks,
   useCreateAiTask,
   useUpdateAiTask,
   useDeleteAiTask,
   useToggleAiTask,
+  useRunAiTaskNow,
   validateCronExpression,
   describeCron,
   type AiScheduledTask,
@@ -51,6 +55,7 @@ import {
   Trash2,
   Clock,
   RefreshCw,
+  Play,
   CheckCircle,
   XCircle,
 } from "lucide-react";
@@ -81,6 +86,8 @@ interface TaskFormState {
   lockTtlSeconds: number;
   retryMax: number;
   retryBackoffSeconds: number;
+  customPrompt: string;
+  notifyUserIds: string[];
   enabled: boolean;
 }
 
@@ -94,16 +101,35 @@ const DEFAULT_FORM: TaskFormState = {
   lockTtlSeconds: 300,
   retryMax: 3,
   retryBackoffSeconds: 60,
+  customPrompt: "",
+  notifyUserIds: [],
   enabled: false,
 };
 
 export function AdminAiScheduledTasksPage() {
+  const { site, user } = useCurrentSite();
   const { hasPermission } = usePermissions();
   const { data: tasks, isLoading } = useAiScheduledTasks();
   const createTask = useCreateAiTask();
   const updateTask = useUpdateAiTask();
   const deleteTask = useDeleteAiTask();
   const toggleTask = useToggleAiTask();
+  const runNow = useRunAiTaskNow();
+  const { data: siteUsers = [] } = useQuery({
+    queryKey: ["site_users", site?.id, "ai_task_notify"],
+    queryFn: async () => {
+      if (!site) return [] as Array<{ id: string; email: string; display_name: string | null }>;
+      const { data, error } = await supabase
+        .from("site_users")
+        .select("id, email, display_name")
+        .eq("site_id", site.id)
+        .eq("active", true)
+        .order("email", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Array<{ id: string; email: string; display_name: string | null }>;
+    },
+    enabled: !!site,
+  });
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -134,6 +160,13 @@ export function AdminAiScheduledTasksPage() {
       lockTtlSeconds: task.lockTtlSeconds,
       retryMax: task.retryMax,
       retryBackoffSeconds: task.retryBackoffSeconds,
+      customPrompt: task.customPrompt ?? "",
+      notifyUserIds:
+        task.notifyUserIds?.length
+          ? task.notifyUserIds
+          : task.createdBy
+            ? [task.createdBy]
+            : [],
       enabled: task.enabled,
     });
     setFormOpen(true);
@@ -152,6 +185,8 @@ export function AdminAiScheduledTasksPage() {
       lockTtlSeconds: form.lockTtlSeconds,
       retryMax: form.retryMax,
       retryBackoffSeconds: form.retryBackoffSeconds,
+      customPrompt: form.customPrompt || null,
+      notifyUserIds: form.notifyUserIds,
       enabled: form.enabled,
     };
 
@@ -218,6 +253,7 @@ export function AdminAiScheduledTasksPage() {
                   <TableHead className="hidden md:table-cell">Schedule</TableHead>
                   <TableHead className="hidden lg:table-cell">Last Run</TableHead>
                   <TableHead>Enabled</TableHead>
+                  <TableHead className="w-[100px] text-right">Run</TableHead>
                   <TableHead className="w-[100px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -279,6 +315,16 @@ export function AdminAiScheduledTasksPage() {
                         }
                         disabled={toggleTask.isPending}
                       />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => runNow.mutate(task.id)}
+                        disabled={runNow.isPending}
+                      >
+                        <Play className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
@@ -366,6 +412,18 @@ export function AdminAiScheduledTasksPage() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label>Task Prompt (optional)</Label>
+              <Textarea
+                value={form.customPrompt}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, customPrompt: e.target.value }))
+                }
+                placeholder="If provided, this prompt is used instead of the default scan prompt."
+                rows={4}
+              />
+            </div>
+
             {/* Cron & Timezone */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -405,6 +463,40 @@ export function AdminAiScheduledTasksPage() {
                   value={form.timezone}
                   onValueChange={(v) => setForm((f) => ({ ...f, timezone: v }))}
                 />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Notify Users</Label>
+              <div className="max-h-36 space-y-2 overflow-y-auto rounded-md border p-3">
+                {siteUsers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No active users found for this site.</p>
+                ) : (
+                  siteUsers.map((siteUser) => {
+                    const checked = form.notifyUserIds.includes(siteUser.id);
+                    const label = siteUser.display_name || siteUser.email;
+                    return (
+                      <label key={siteUser.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setForm((f) => ({
+                              ...f,
+                              notifyUserIds: e.target.checked
+                                ? [...f.notifyUserIds, siteUser.id]
+                                : f.notifyUserIds.filter((id) => id !== siteUser.id),
+                            }));
+                          }}
+                        />
+                        <span>{label}</span>
+                        {user?.id === siteUser.id ? (
+                          <span className="text-xs text-muted-foreground">(you)</span>
+                        ) : null}
+                      </label>
+                    );
+                  })
+                )}
               </div>
             </div>
 

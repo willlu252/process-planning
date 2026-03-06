@@ -4,6 +4,8 @@ import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { encrypt, decrypt, maskCredential, rotateEncryption } from '../security/crypto.js';
 import { supabaseAdmin, encryptionConfig } from '../server.js';
 import { invalidatePromptCache } from '../claude/prompt-assembler.js';
+import { runClaudeScan } from '../claude/scan-runner.js';
+import { runtimeConfig } from '../server.js';
 
 export const adminRouter = Router();
 
@@ -313,6 +315,153 @@ async function updateCredentialStatus(
     .eq('site_id', siteId);
 }
 
+/**
+ * POST /ai/admin/tasks/:id/run
+ * Runs a scheduled task immediately (manual trigger).
+ * Requires: ai.admin.tasks permission.
+ */
+adminRouter.post('/admin/tasks/:id/run', async (req: Request, res: Response) => {
+  const user = req.user!;
+  const taskId = req.params.id;
+  const { siteId } = req.body as { siteId: string };
+
+  if (!siteId || !taskId) {
+    res.status(400).json({ error: 'siteId and task id are required' });
+    return;
+  }
+
+  const auth = authorise(user, 'ai.admin.tasks', siteId);
+  if (!auth.allowed) {
+    res.status(403).json({ error: auth.reason });
+    return;
+  }
+
+  const { data: task, error: taskErr } = await supabaseAdmin
+    .from('ai_scheduled_tasks')
+    .select('id, site_id, name, task_type, custom_prompt, notify_user_ids, created_by')
+    .eq('id', taskId)
+    .eq('site_id', siteId)
+    .single();
+
+  if (taskErr || !task) {
+    res.status(404).json({ error: 'Scheduled task not found' });
+    return;
+  }
+
+  const startedAt = Date.now();
+  const runInsert = await supabaseAdmin
+    .from('ai_task_runs')
+    .insert({
+      task_id: task.id,
+      site_id: siteId,
+      scheduled_for: new Date().toISOString(),
+      idempotency_key: `manual:${task.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      status: 'running',
+      attempt: 1,
+      started_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+
+  const runId = runInsert.data?.id as string | undefined;
+
+  const result = await runClaudeScan({
+    supabase: supabaseAdmin,
+    supabaseUrl: runtimeConfig.supabaseUrl,
+    supabaseServiceKey: runtimeConfig.supabaseServiceKey,
+    siteId,
+    scanType: task.task_type as 'schedule_optimization' | 'rule_analysis' | 'capacity_check' | 'full_audit',
+    promptOverride: task.custom_prompt,
+    triggeredBy: siteUserId(user),
+    scheduledTaskId: task.id,
+    currentKey: encryptionConfig.currentKey,
+    previousKey: encryptionConfig.previousKey,
+  });
+
+  const durationMs = Date.now() - startedAt;
+  const notifyUserIds = (task.notify_user_ids as string[] | null)?.length
+    ? (task.notify_user_ids as string[])
+    : task.created_by
+      ? [task.created_by as string]
+      : [];
+
+  if (!result.success) {
+    if (runId) {
+      await supabaseAdmin
+        .from('ai_task_runs')
+        .update({
+          status: 'failed',
+          error: result.error ?? 'Manual run failed',
+          finished_at: new Date().toISOString(),
+        })
+        .eq('id', runId);
+    }
+
+    await supabaseAdmin
+      .from('ai_scheduled_tasks')
+      .update({
+        last_error: result.error ?? 'Manual run failed',
+        last_run_duration_ms: durationMs,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', task.id);
+
+    if (notifyUserIds.length) {
+      await supabaseAdmin.from('notifications').insert(
+        notifyUserIds.map((uid) => ({
+          site_id: siteId,
+          user_id: uid,
+          title: `Scheduled task failed: ${task.name}`,
+          message: result.error ?? 'Manual run failed',
+          type: 'error',
+        })),
+      );
+    }
+
+    res.status(result.credentialError ? 422 : 500).json({
+      error: result.error ?? 'Failed to run task',
+      runId,
+      scanId: result.scanId,
+    });
+    return;
+  }
+
+  if (runId) {
+    await supabaseAdmin
+      .from('ai_task_runs')
+      .update({
+        status: 'completed',
+        finished_at: new Date().toISOString(),
+        error: null,
+      })
+      .eq('id', runId);
+  }
+
+  await supabaseAdmin
+    .from('ai_scheduled_tasks')
+    .update({
+      last_run_at: new Date().toISOString(),
+      last_error: null,
+      last_run_duration_ms: durationMs,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', task.id);
+
+  if (notifyUserIds.length) {
+    await supabaseAdmin.from('notifications').insert(
+      notifyUserIds.map((uid) => ({
+        site_id: siteId,
+        user_id: uid,
+        title: `Scheduled task completed: ${task.name}`,
+        message: `Manual run completed (${result.scanId ?? 'scan'})`,
+        type: 'info',
+      })),
+    );
+  }
+
+  res.status(201).json({ success: true, runId, scanId: result.scanId });
+});
+
 // ─── Prompt Sections ────────────────────────────────────────────────────────
 
 /**
@@ -440,38 +589,44 @@ adminRouter.post('/admin/prompt-sections/reset', async (req: Request, res: Respo
   }
 
   try {
-    // Delete existing sections
-    const { error: deleteErr } = await supabaseAdmin
-      .from('ai_prompt_sections')
-      .delete()
-      .eq('site_id', siteId);
-
-    if (deleteErr) {
-      console.error('[ai-agent] Prompt sections delete error:', deleteErr);
-      res.status(500).json({ error: 'Failed to delete existing sections' });
-      return;
-    }
-
-    // Re-insert defaults
-    const defaults = getDefaultPromptSections(siteId);
-    const { error: insertErr } = await supabaseAdmin
-      .from('ai_prompt_sections')
-      .insert(defaults);
-
-    if (insertErr) {
-      console.error('[ai-agent] Prompt sections reset insert error:', insertErr);
-      res.status(500).json({ error: 'Failed to insert default sections' });
-      return;
-    }
-
-    invalidatePromptCache(siteId);
-
-    // Return the freshly inserted sections
-    const { data } = await supabaseAdmin
+    // Snapshot existing sections — returned to the caller on RPC failure so the
+    // client always has a safe copy of the last-known state.
+    const { data: oldSections, error: fetchErr } = await supabaseAdmin
       .from('ai_prompt_sections')
       .select('*')
       .eq('site_id', siteId)
       .order('sort_order', { ascending: true });
+
+    if (fetchErr) {
+      console.error('[ai-agent] Prompt sections snapshot error:', fetchErr);
+      res.status(500).json({ error: 'Failed to read existing sections before reset' });
+      return;
+    }
+
+    // Build the defaults payload (exclude site_id — the DB function supplies it
+    // via its p_site_id parameter).
+    const defaults = getDefaultPromptSections(siteId).map(
+      ({ site_id: _ignored, ...section }) => section,
+    );
+
+    // Single transactional RPC: DELETE + INSERT run inside one PL/pgSQL
+    // function body.  If the INSERT fails the DELETE is automatically rolled
+    // back by PostgreSQL, so the previous sections are never lost.
+    const { data, error: rpcErr } = await supabaseAdmin.rpc(
+      'reset_ai_prompt_sections_transactional',
+      { p_site_id: siteId, p_sections: defaults },
+    );
+
+    if (rpcErr) {
+      console.error('[ai-agent] Prompt sections transactional reset error:', rpcErr);
+      res.status(500).json({
+        error: 'Failed to reset prompt sections; previous sections preserved',
+        sections: oldSections ?? [],
+      });
+      return;
+    }
+
+    invalidatePromptCache(siteId);
 
     res.json({ sections: data ?? [] });
   } catch (err) {

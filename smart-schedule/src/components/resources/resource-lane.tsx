@@ -28,12 +28,15 @@ interface ResourceLaneProps {
   dragOver?: DropTarget | null;
   dropTargets?: Map<string, DropTarget>;
   canDrag?: boolean;
+  canSchedule?: boolean;
   onBatchClick?: (batch: Batch) => void;
   onDragStart?: (batch: Batch, e: React.DragEvent) => void;
   onDragEnd?: () => void;
   onDragOver?: (resourceId: string, date: string, e: React.DragEvent) => void;
   onDragLeave?: () => void;
   onDrop?: (resourceId: string, date: string) => void;
+  onMoveStart?: (batch: Batch) => void;
+  onReschedule?: (batch: Batch) => void;
 }
 
 function CapacityBar({
@@ -97,12 +100,15 @@ export function ResourceLane({
   draggedBatchId,
   dropTargets,
   canDrag = false,
+  canSchedule = false,
   onBatchClick,
   onDragStart,
   onDragEnd,
   onDragOver,
   onDragLeave,
   onDrop,
+  onMoveStart,
+  onReschedule,
 }: ResourceLaneProps) {
   // Group batches by date
   const batchesByDate = useMemo(() => {
@@ -234,9 +240,12 @@ export function ResourceLane({
                   isHighlighted={highlightedBatchIds?.has(batch.id)}
                   isDragging={draggedBatchId === batch.id}
                   draggable={canDrag}
+                  canSchedule={canSchedule}
                   onClick={onBatchClick}
                   onDragStart={onDragStart}
                   onDragEnd={onDragEnd}
+                  onMoveStart={onMoveStart}
+                  onReschedule={onReschedule}
                 />
               ))}
             </div>

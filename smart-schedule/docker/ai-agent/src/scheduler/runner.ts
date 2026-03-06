@@ -38,7 +38,11 @@ export type TaskExecutor = (ctx: TaskExecutionContext) => Promise<TaskExecutionR
 export interface TaskExecutionContext {
   taskId: string;
   siteId: string;
+  taskName: string;
   taskType: string;
+  customPrompt?: string | null;
+  notifyUserIds?: string[] | null;
+  createdBy?: string | null;
   runId: string;
   attempt: number;
 }
@@ -61,10 +65,13 @@ interface ScheduledTaskRow {
   lock_ttl_seconds: number;
   retry_max: number;
   retry_backoff_seconds: number;
+  custom_prompt: string | null;
+  notify_user_ids: string[] | null;
   enabled: boolean;
   lock_key: string | null;
   last_run_at: string | null;
   next_run_at: string | null;
+  created_by: string | null;
 }
 
 interface CredentialRow {
@@ -194,7 +201,7 @@ export class SchedulerRunner {
     // expiry per task, so locked-but-expired tasks are properly reconsidered.
     const { data, error } = await this.supabase
       .from('ai_scheduled_tasks')
-      .select('id, site_id, name, task_type, cron_expression, timezone, misfire_policy, lock_ttl_seconds, retry_max, retry_backoff_seconds, enabled, lock_key, last_run_at, next_run_at')
+      .select('id, site_id, name, task_type, cron_expression, timezone, misfire_policy, lock_ttl_seconds, retry_max, retry_backoff_seconds, custom_prompt, notify_user_ids, enabled, lock_key, last_run_at, next_run_at, created_by')
       .eq('enabled', true)
       .or(`next_run_at.is.null,next_run_at.lte.${now}`)
       .limit(this.maxConcurrent * 2);
@@ -534,7 +541,11 @@ export class SchedulerRunner {
           {
             taskId: task.id,
             siteId: task.site_id,
+            taskName: task.name,
             taskType: task.task_type,
+            customPrompt: task.custom_prompt,
+            notifyUserIds: task.notify_user_ids,
+            createdBy: task.created_by,
             runId,
             attempt,
           },

@@ -2,7 +2,7 @@
 /**
  * MCP server for the Process Planning Agent.
  *
- * Exposes ONLY schedule-db tools.
+ * Exposes schedule-db and scoring tools.
  * Runs as a child process spawned by Claude Code via stdio transport.
  *
  * Security:
@@ -13,6 +13,8 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { scheduleDbTools, handleScheduleDbTool } from './tools/schedule-db.js';
+import { scoringTools, handleScoringTool } from './tools/scoring.js';
+import { wikiTools, handleWikiTool } from './tools/wiki-search.js';
 
 // ─── Environment ────────────────────────────────────────────────────────────
 
@@ -40,6 +42,8 @@ const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY
 /** All allowed tool names. Anything not in this set is denied. */
 const ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   ...scheduleDbTools.map((t) => t.name),
+  ...scoringTools.map((t) => t.name),
+  ...wikiTools.map((t) => t.name),
 ]);
 
 /** Tool categories that are explicitly denied (for logging). */
@@ -54,7 +58,7 @@ function isToolAllowed(toolName: string): boolean {
 
 // ─── Combined Tool List ─────────────────────────────────────────────────────
 
-const allTools = [...scheduleDbTools];
+const allTools = [...scheduleDbTools, ...scoringTools, ...wikiTools];
 
 // ─── JSONRPC over stdio ─────────────────────────────────────────────────────
 
@@ -160,7 +164,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
           jsonrpc: '2.0',
           id,
           result: {
-            content: [{ type: 'text', text: `DENIED: ${reason} Only schedule-db tools are permitted.` }],
+            content: [{ type: 'text', text: `DENIED: ${reason} Only schedule-db and scoring tools are permitted.` }],
             isError: true,
           },
         });
@@ -168,8 +172,14 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
       }
 
       try {
-        // Route to schedule-db handler (the only registered tool set)
-        const result = await handleScheduleDbTool(toolName, toolArgs, supabase, MCP_SITE_ID);
+        // Route to appropriate handler based on tool name
+        const scoringToolNames = new Set(scoringTools.map((t) => t.name));
+        const wikiToolNames = new Set(wikiTools.map((t) => t.name));
+        const result = scoringToolNames.has(toolName)
+          ? await handleScoringTool(toolName, toolArgs, supabase, MCP_SITE_ID)
+          : wikiToolNames.has(toolName)
+            ? await handleWikiTool(toolName, toolArgs, supabase, MCP_SITE_ID)
+            : await handleScheduleDbTool(toolName, toolArgs, supabase, MCP_SITE_ID);
 
         sendResponse({ jsonrpc: '2.0', id, result });
       } catch (err) {

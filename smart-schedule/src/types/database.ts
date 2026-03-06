@@ -284,6 +284,8 @@ export interface DatabaseRow {
     lock_ttl_seconds: number;
     retry_max: number;
     retry_backoff_seconds: number;
+    custom_prompt: string | null;
+    notify_user_ids: string[];
     enabled: boolean;
     lock_key: string | null;
     last_run_at: string | null;

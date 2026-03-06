@@ -43,34 +43,6 @@ export const ROUTE_PERMISSIONS = {
 
 export type RouteAction = keyof typeof ROUTE_PERMISSIONS;
 
-/**
- * Role-to-permission mapping, mirroring the frontend's ROLE_PERMISSIONS.
- */
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  super_admin: [
-    'batches.read', 'batches.write', 'batches.schedule', 'batches.status',
-    'resources.read', 'resources.write',
-    'rules.read', 'rules.write',
-    'planning.import', 'planning.coverage', 'planning.vet', 'planning.export', 'planning.ai',
-    'admin.users', 'admin.settings', 'admin.sites',
-    'alerts.read', 'alerts.acknowledge', 'alerts.write',
-  ],
-  site_admin: [
-    'batches.read', 'batches.write', 'batches.schedule', 'batches.status',
-    'resources.read', 'resources.write',
-    'rules.read', 'rules.write',
-    'planning.import', 'planning.coverage', 'planning.vet', 'planning.export', 'planning.ai',
-    'admin.users', 'admin.settings',
-    'alerts.read', 'alerts.acknowledge', 'alerts.write',
-  ],
-  member: [
-    'batches.read', 'batches.status',
-    'resources.read',
-    'rules.read',
-    'planning.coverage',
-    'alerts.read', 'alerts.acknowledge',
-  ],
-};
 
 /**
  * Extracts the site_id from JWT claims.
@@ -86,27 +58,12 @@ export function extractSiteId(claims: JwtUserClaims): string | null {
 }
 
 /**
- * Extracts the user's app_role from JWT claims.
- */
-function extractAppRole(claims: JwtUserClaims): string | null {
-  return (
-    claims.app_role ??
-    claims.user_metadata?.role ??
-    null
-  );
-}
-
-/**
- * Derives permissions from the user's role.
+ * Reads permissions from JWT claims (app_metadata.permissions).
+ * Permissions are injected by the custom_access_token_hook at login time,
+ * so role changes take effect on the next token refresh without any code deployment.
  */
 export function extractPermissions(claims: JwtUserClaims): string[] {
-  // Check explicit permissions first (if populated by app_metadata)
-  if (claims.app_metadata?.permissions?.length) {
-    return claims.app_metadata.permissions;
-  }
-  // Derive from role
-  const role = extractAppRole(claims);
-  return role ? (ROLE_PERMISSIONS[role] ?? []) : [];
+  return claims.app_metadata?.permissions ?? [];
 }
 
 /**

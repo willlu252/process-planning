@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { authorise, type JwtUserClaims } from '../security/permissions.js';
 import { supabaseAdmin, encryptionConfig, runtimeConfig } from '../server.js';
 import { SessionManager } from '../claude/session-manager.js';
-import { spawnClaudeAgentStreaming } from '../claude/spawner.js';
+import { getAgentRunner } from '../agent/runner.js';
 import { assembleSystemPrompt } from '../claude/prompt-assembler.js';
 import { resolveSiteCredential } from '../claude/scan-runner.js';
 
@@ -74,6 +74,13 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
 
     sendSSE(res, 'session', { sessionId: chatSession.id });
 
+    // Load history BEFORE adding the new message so buildMessages doesn't duplicate it
+    const history = await sessionManager.getMessages(chatSession.id, { limit: 50 });
+    const conversationHistory = history.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
     await sessionManager.addMessage(chatSession.id, siteId, 'user', message, {});
 
     const abortController = new AbortController();
@@ -81,16 +88,11 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
 
     let resumeId = chatSession.sessionResumeId ?? undefined;
     let assistantText = '';
+    const runner = getAgentRunner();
 
-    // Load conversation history for multi-turn context
-    const history = await sessionManager.getMessages(chatSession.id, { limit: 50 });
-    const conversationHistory = history.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    for await (const chunk of spawnClaudeAgentStreaming({
+    for await (const chunk of runner.runStreaming({
       apiKey: credential.credential,
+      keyType: credential.keyType,
       supabaseUrl: runtimeConfig.supabaseUrl,
       supabaseServiceKey: runtimeConfig.supabaseServiceKey,
       siteId,
