@@ -128,10 +128,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
           const { error: refreshError } = await supabase.auth.refreshSession();
           if (refreshError) throw refreshError;
 
-          // Re-fetch through bootstrap-friendly RLS path after token claims refresh.
+          // Re-fetch the current user's own row after token claims refresh.
+          // Must filter by external_id to avoid returning other users visible via RLS.
           const relink = await supabase
             .from("site_users")
             .select("*")
+            .eq("external_id", authUserId)
             .eq("active", true);
           if (relink.error) throw relink.error;
           userRows = relink.data;
